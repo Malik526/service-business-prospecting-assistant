@@ -1,4 +1,26 @@
-"""Google Places and Geocoding API client."""
+"""Google Places and Geocoding API client.
+
+This module handles all communication with two Google APIs:
+  - Geocoding API: converts a ZIP code into geographic coordinates (lat/lng).
+  - Places API (Text Search + Place Details): finds businesses by category
+    within a radius and fetches enriched details for each result.
+
+Pagination
+----------
+Google Places Text Search returns up to 20 results per page. When more results
+exist, the response includes a `next_page_token`. Passing this token as
+`pagetoken` in the next request fetches the next page. There is a mandatory
+~2-second propagation delay before a token is usable — that is why this module
+sleeps 2 seconds between paginated requests. `max_pages_per_category` caps how
+many pages are fetched per category to control API usage and billing.
+
+Distance
+--------
+Each prospect includes a `distance_miles` field calculated via the Haversine
+formula (see utils.py). The search origin (ZIP centroid) is retained in memory
+during a `discover_prospects` call and compared against each business's
+geometry returned by the Text Search response.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +29,7 @@ from typing import Any
 
 import requests
 
-from utils import miles_to_meters
+from utils import haversine_distance, miles_to_meters
 
 
 GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
@@ -21,10 +43,21 @@ class GooglePlacesClient:
         self.max_pages_per_category = max_pages_per_category
 
     def zip_to_location(self, zip_code: str) -> tuple[float, float]:
+        """Convert a US ZIP code into (latitude, longitude) via the Geocoding API.
+
+        Uses both `address` and `components` parameters to improve result
+        accuracy — the `components` filter pins the result to US postal codes
+        and reduces false matches for ambiguous ZIP codes.
+
+        Raises:
+            RuntimeError: if the API returns a non-OK status.
+            ValueError: if no geocoding result is found for the ZIP.
+        """
         response = requests.get(
             GEOCODE_URL,
             params={
                 "address": zip_code,
+                # components filter improves accuracy for ambiguous ZIPs
                 "components": f"postal_code:{zip_code}|country:US",
                 "key": self.api_key,
             },
@@ -45,6 +78,21 @@ class GooglePlacesClient:
         longitude: float,
         radius_miles: float,
     ) -> list[dict[str, Any]]:
+        """Search Google Places for businesses matching a single category.
+
+        Handles pagination automatically up to `max_pages_per_category` pages.
+        Each page returns up to 20 results. A 2-second sleep is required between
+        paginated requests because the `next_page_token` has a server-side
+        propagation delay before it becomes valid.
+
+        Args:
+            category: A dict from TARGET_CATEGORIES with `name` and `query` keys.
+            latitude, longitude: Center point of the search area.
+            radius_miles: Search radius (converted to meters for the API).
+
+        Returns:
+            A flat list of raw Place objects from the API across all fetched pages.
+        """
         results: list[dict[str, Any]] = []
         params = {
             "query": category["query"],
@@ -62,12 +110,24 @@ class GooglePlacesClient:
             if not next_page_token or page_number + 1 >= self.max_pages_per_category:
                 break
 
+            # Google requires a short delay before the next_page_token is usable.
             time.sleep(2)
             params = {"pagetoken": next_page_token, "key": self.api_key}
 
         return results
 
     def get_place_details(self, place_id: str) -> dict[str, Any]:
+        """Fetch enriched details for a single place by its Place ID.
+
+        The `fields` parameter limits which data is returned, which controls
+        billing cost. Only fields actually used downstream are requested.
+
+        Args:
+            place_id: Google Places unique identifier for the business.
+
+        Returns:
+            A dict of place detail fields, or an empty dict if not found.
+        """
         response = requests.get(
             DETAILS_URL,
             params={
@@ -89,6 +149,28 @@ class GooglePlacesClient:
         zip_code: str,
         radius_miles: float,
     ) -> list[dict[str, Any]]:
+        """Search for business prospects across all target categories.
+
+        Orchestrates the full discovery pipeline:
+          1. Geocode the ZIP code to get a search center (lat/lng).
+          2. For each category, run a Text Search within the radius.
+          3. For each search result, fetch enriched Place Details.
+          4. Skip non-operational businesses (permanently closed, etc.).
+          5. Compute the distance from the search ZIP to each business.
+
+        The business geometry (lat/lng) used for distance comes from the Text
+        Search result rather than Place Details — geometry is not included in
+        the Details fields we request, and the Text Search result is accurate
+        enough for distance display purposes.
+
+        Args:
+            categories: List of category dicts from TARGET_CATEGORIES.
+            zip_code: The user's input ZIP code (search origin).
+            radius_miles: Search radius in miles.
+
+        Returns:
+            List of enriched prospect dicts ready for deduplication and scoring.
+        """
         latitude, longitude = self.zip_to_location(zip_code)
         prospects: list[dict[str, Any]] = []
 
@@ -100,9 +182,21 @@ class GooglePlacesClient:
                     continue
 
                 details = self.get_place_details(place_id)
+
+                # Skip businesses that are not currently operational (e.g., permanently closed).
                 business_status = details.get("business_status") or item.get("business_status")
                 if business_status and business_status != "OPERATIONAL":
                     continue
+
+                # Business lat/lng comes from the Text Search geometry — Place Details
+                # doesn't return geometry with our current field selection.
+                biz_location = item.get("geometry", {}).get("location", {})
+                biz_lat = biz_location.get("lat")
+                biz_lng = biz_location.get("lng")
+                if biz_lat is not None and biz_lng is not None:
+                    distance_miles = haversine_distance(latitude, longitude, biz_lat, biz_lng)
+                else:
+                    distance_miles = ""
 
                 prospects.append(
                     {
@@ -114,8 +208,10 @@ class GooglePlacesClient:
                         "website": details.get("website", ""),
                         "google_maps_url": details.get("url", ""),
                         "rating": details.get("rating") or item.get("rating", ""),
-                        "review_count": details.get("user_ratings_total")
-                        or item.get("user_ratings_total", ""),
+                        "review_count": (
+                            details.get("user_ratings_total") or item.get("user_ratings_total", "")
+                        ),
+                        "distance_miles": distance_miles,
                         "source": "Google Places API",
                     }
                 )
@@ -124,6 +220,21 @@ class GooglePlacesClient:
 
     @staticmethod
     def _parse_response(response: requests.Response, allow_zero_results: bool = False) -> dict[str, Any]:
+        """Parse and validate a Google API JSON response.
+
+        Google APIs return HTTP 200 even for application-level errors; the real
+        status is in the JSON `status` field. This method surfaces those errors
+        as Python exceptions so callers don't need to inspect raw payloads.
+
+        Args:
+            response: The raw requests.Response from a Google API call.
+            allow_zero_results: If True, treat ZERO_RESULTS as non-fatal. Used
+                for category searches where no matches in an area is expected.
+
+        Raises:
+            requests.HTTPError: on non-2xx HTTP status.
+            RuntimeError: on application-level API errors (e.g., REQUEST_DENIED).
+        """
         response.raise_for_status()
         payload = response.json()
         status = payload.get("status")
