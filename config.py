@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+DEFAULT_SERVICE_ACCOUNT_FILE = "./credentials/service-account.json"
+
 
 @dataclass(frozen=True)
 class Config:
@@ -23,7 +25,10 @@ def load_config() -> Config:
     return Config(
         google_places_api_key=os.getenv("GOOGLE_PLACES_API_KEY", "").strip(),
         google_sheet_id=os.getenv("GOOGLE_SHEET_ID", "").strip(),
-        google_service_account_file=os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "").strip(),
+        google_service_account_file=os.getenv(
+            "GOOGLE_SERVICE_ACCOUNT_FILE",
+            DEFAULT_SERVICE_ACCOUNT_FILE,
+        ).strip(),
         sheet_name=os.getenv("GOOGLE_SHEET_NAME", "Prospects").strip() or "Prospects",
         max_pages_per_category=int(os.getenv("MAX_PAGES_PER_CATEGORY", "3")),
     )
