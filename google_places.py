@@ -134,7 +134,7 @@ class GooglePlacesClient:
                 "place_id": place_id,
                 "fields": (
                     "place_id,name,formatted_address,formatted_phone_number,"
-                    "website,rating,user_ratings_total,url,business_status"
+                    "website,rating,user_ratings_total,url,business_status,reviews"
                 ),
                 "key": self.api_key,
             },
@@ -142,6 +142,46 @@ class GooglePlacesClient:
         )
         payload = self._parse_response(response)
         return payload.get("result", {})
+
+    def get_place_reviews(self, place_id: str) -> list[dict]:
+        """Fetch up to 5 five-star Google reviews for a single place.
+
+        Calls get_place_details() which now includes the reviews field.
+        Google Places API returns a maximum of 5 reviews sorted by
+        relevance — the same reviews highlighted in the Google Maps UI.
+
+        Only five-star reviews (rating == 5) are returned. This ensures
+        the brand brief and cold call script are grounded in the strongest,
+        most representative customer feedback.
+
+        Args:
+            place_id: Google Places unique identifier for the business.
+
+        Returns:
+            List of up to 5 five-star review dicts, each containing:
+              - author_name: str
+              - rating: int
+              - text: str
+              - relative_time_description: str
+            Returns empty list if no five-star reviews are found.
+            Preserves Google's relevance-ranked order.
+        """
+        details = self.get_place_details(place_id)
+        all_reviews = details.get("reviews", [])
+
+        # Filter to five-star reviews only — preserve Google's relevance order
+        five_star = [r for r in all_reviews if r.get("rating") == 5]
+
+        # Return only the fields needed downstream
+        return [
+            {
+                "author_name": r.get("author_name", "Anonymous"),
+                "rating": r.get("rating"),
+                "text": r.get("text", "").strip(),
+                "relative_time_description": r.get("relative_time_description", ""),
+            }
+            for r in five_star
+        ]
 
     def discover_prospects(
         self,

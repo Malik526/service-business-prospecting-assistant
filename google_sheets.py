@@ -129,6 +129,22 @@ class GoogleSheetsClient:
             records.append(dict(zip(SHEET_COLUMNS, padded)))
         return records
 
+    def get_record_by_place_id(self, place_id: str) -> dict | None:
+        """Find and return a single row from the sheet matching the given Place ID.
+
+        Reads all existing records and searches for a match in the
+        'Place ID' column. Returns the row as a dict keyed by SHEET_COLUMNS,
+        or None if no match is found.
+
+        Args:
+            place_id: The Google Maps Place ID to search for.
+        """
+        records = self.get_existing_records()
+        for record in records:
+            if record.get("Place ID") == place_id:
+                return record
+        return None
+
     def append_prospects(self, prospects: list[dict[str, Any]]) -> None:
         """Append new prospect rows to the bottom of the sheet.
 
