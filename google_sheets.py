@@ -12,12 +12,29 @@ must be shared with the service account email as an Editor — without this,
 reads and writes will fail with a 403 permission error even if authentication
 itself succeeds.
 
-Column Layout (A–Q)
+Column Layout (A–U)
 -------------------
-Place ID | Business Name | Category | Address | Phone | Website |
-Google Maps URL | Rating | Review Count | Distance From Search ZIP (mi) |
-Source | Lead Score | Why Good Fit | Status | Date Added | Notes |
-Weighted Reputation Score
+A  Place ID
+B  Business Name
+C  Category
+D  Address
+E  Phone
+F  Website
+G  Google Maps URL
+H  Rating
+I  Review Count
+J  Distance From Search ZIP (mi)
+K  Source
+L  Lead Score
+M  Why Good Fit
+N  Status
+O  Date Added
+P  Notes
+Q  Weighted Reputation Score
+R  Search ZIP Code          ← ZIP code used in the discovery run (auto-populated)
+S  Search Radius (mi)       ← Radius used in the discovery run (auto-populated)
+T  Date Contacted           ← Date of first outreach attempt (manual entry)
+U  Follow-Up Date           ← Date of next intended follow-up (manual entry)
 """
 
 from __future__ import annotations
@@ -49,25 +66,44 @@ SHEET_COLUMNS = [
     "Date Added",
     "Notes",
     "Weighted Reputation Score",
+    "Search ZIP Code",        # Column R — ZIP used in the discovery run
+    "Search Radius (mi)",     # Column S — radius used in the discovery run
+    "Date Contacted",         # Column T — date of first outreach attempt
+    "Follow-Up Date",         # Column U — date of next intended follow-up
 ]
 
 # Column letter of the last column, derived from SHEET_COLUMNS length.
 # Update this if columns are added or removed.
-_LAST_COL = "Q"  # 17 columns: A through Q
+_LAST_COL = "U"  # 21 columns: A through U
 
 # Allowed values for the Status dropdown. These represent the prospect's
 # current stage in the outreach workflow, from initial discovery to close.
+#
+# Stages in order:
+#   New          → Reviewed → Good Fit / Not Fit
+#   Good Fit     → Called → Contacted
+#   Contacted    → FollowUp 1 → FollowUp 2 → FollowUp 3
+#   FollowUp 3   → Interested → Demo Booked → Proposal Sent → Negotiating → Meeting Booked → Client
+#   Dead ends:   → Not Interested | Ghosted | Do Not Contact
 STATUS_OPTIONS = [
-    "New",           # Just discovered, not yet reviewed
-    "Reviewed",      # Manually reviewed, decision pending
-    "Good Fit",      # Determined to be a strong outreach candidate
-    "Not Fit",       # Reviewed and ruled out
-    "Contacted",     # First outreach sent
-    "Followed Up",   # At least one follow-up sent
-    "Interested",    # Prospect expressed interest
-    "Meeting Booked",# Discovery call or meeting scheduled
-    "Client",        # Converted to paying client
-    "Not Interested",# Prospect declined or unresponsive after follow-up
+    "New",              # Just discovered, not yet reviewed
+    "Reviewed",         # Manually reviewed, decision pending
+    "Good Fit",         # Determined to be a strong outreach candidate
+    "Not Fit",          # Reviewed and ruled out
+    "Called",           # Phone call attempted — no answer or voicemail
+    "Contacted",        # First outreach sent — call, DM, or email
+    "FollowUp 1",       # First follow-up sent after initial contact
+    "FollowUp 2",       # Second follow-up sent
+    "FollowUp 3",       # Third follow-up — final attempt before closing
+    "Interested",       # Prospect expressed interest
+    "Demo Booked",      # Screen share or demo call scheduled
+    "Proposal Sent",    # Pricing and proposal sent to prospect
+    "Negotiating",      # In active conversation about terms
+    "Meeting Booked",   # Discovery call or meeting scheduled
+    "Client",           # Converted to paying client
+    "Not Interested",   # Prospect explicitly declined
+    "Ghosted",          # No response after 3+ follow-up attempts
+    "Do Not Contact",   # Requested no further outreach
 ]
 
 
@@ -263,4 +299,13 @@ def prospect_to_sheet_row(prospect: dict[str, Any]) -> list[Any]:
         prospect.get("date_added", ""),
         prospect.get("notes", ""),
         prospect.get("weighted_reputation_score", ""),
+        # --- Manually updated fields ---
+        # search_zip and search_radius are auto-populated from CLI args.
+        # date_contacted and follow_up_date are left empty on creation
+        # and filled in manually by the user in the Google Sheet
+        # after outreach occurs.
+        prospect.get("search_zip", ""),
+        prospect.get("search_radius", ""),
+        prospect.get("date_contacted", ""),
+        prospect.get("follow_up_date", ""),
     ]

@@ -233,6 +233,11 @@ def main() -> None:
             duplicate_count += 1
             continue
 
+        # Tag each prospect with the run parameters for traceability.
+        # Allows filtering and grouping by ZIP code and radius in the sheet.
+        prospect["search_zip"] = args.zip_code
+        prospect["search_radius"] = args.radius
+
         enriched = enrich_with_score(prospect, category_lookup)
         new_prospects.append(enriched)
         # Update index in-memory so later prospects in this run are checked
