@@ -12,7 +12,7 @@ must be shared with the service account email as an Editor — without this,
 reads and writes will fail with a 403 permission error even if authentication
 itself succeeds.
 
-Column Layout (A–U)
+Column Layout (A–V)
 -------------------
 A  Place ID
 B  Business Name
@@ -35,6 +35,7 @@ R  Search ZIP Code          ← ZIP code used in the discovery run (auto-populat
 S  Search Radius (mi)       ← Radius used in the discovery run (auto-populated)
 T  Date Contacted           ← Date of first outreach attempt (manual entry)
 U  Follow-Up Date           ← Date of next intended follow-up (manual entry)
+V  Instagram URL            ← Extracted from business website (auto-populated)
 """
 
 from __future__ import annotations
@@ -70,11 +71,12 @@ SHEET_COLUMNS = [
     "Search Radius (mi)",     # Column S — radius used in the discovery run
     "Date Contacted",         # Column T — date of first outreach attempt
     "Follow-Up Date",         # Column U — date of next intended follow-up
+    "Instagram URL",          # Column V — extracted from business website (auto-populated)
 ]
 
 # Column letter of the last column, derived from SHEET_COLUMNS length.
 # Update this if columns are added or removed.
-_LAST_COL = "U"  # 21 columns: A through U
+_LAST_COL = "V"  # 22 columns: A through V
 
 # Allowed values for the Status dropdown. These represent the prospect's
 # current stage in the outreach workflow, from initial discovery to close.
@@ -308,4 +310,5 @@ def prospect_to_sheet_row(prospect: dict[str, Any]) -> list[Any]:
         prospect.get("search_radius", ""),
         prospect.get("date_contacted", ""),
         prospect.get("follow_up_date", ""),
+        prospect.get("instagram_url", ""),
     ]

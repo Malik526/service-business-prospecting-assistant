@@ -2,6 +2,123 @@
 
 ---
 
+## [2026-05-27] — chore: disable Instagram URL extraction; preserve column for manual entry
+
+**Files Modified:** `main.py`, `pipeline/social.py`
+
+### What Changed
+
+**main.py — Extraction block removed**
+- Removed the conditional `if enriched.get("website")` block that called
+  `extract_instagram_url()` and its inline `from pipeline.social import` statement.
+- Replaced with a single unconditional assignment: `enriched["instagram_url"] = ""`.
+  The field is still written to every prospect dict so the Google Sheet column (V)
+  continues to receive a value on every row — it is just always empty.
+
+**main.py — `print_summary()` Instagram section removed**
+- Removed the "Instagram URL Coverage" section (count and percentage block) that
+  would always show 0 / 0.0% with extraction disabled. The Website Coverage and
+  Lead Score sections are unaffected.
+
+**pipeline/social.py — Disable comment added**
+- Added a four-line comment block immediately after the module docstring explaining
+  that extraction is disabled, why (performance impact at scale), and exactly how
+  to re-enable it (import and call `extract_instagram_url()` in `main.py`).
+- The file, function, and all implementation code are fully preserved.
+
+### What Was Kept
+- `pipeline/social.py` — file intact, function intact, ready to re-enable.
+- `"Instagram URL"` column V in `google_sheets.py` — unchanged; rows will have an
+  empty string written automatically, which keeps the column present and available
+  for manual entry in the sheet.
+- All other pipeline functionality — unchanged.
+
+### Why
+Per-prospect HTTP fetches added 0–5 seconds per site at the tail of each enrichment
+loop iteration. At scale (60+ prospects per run) this caused SSL timeout errors and
+significantly slowed pipeline completion. The column is preserved so high-priority
+prospects can have Instagram URLs entered manually after the run.
+
+### Verification Steps
+```
+cd ~/growth_agency/internal-tools/service-business-prospecting-assistant
+source .venv/bin/activate
+python3 main.py --zip 07032 --radius 15
+```
+Confirm:
+1. Pipeline completes without SSL timeout errors.
+2. Console report has no "Instagram URL Coverage" section.
+3. Google Sheet column V (`Instagram URL`) exists with empty cells for new rows.
+4. All other columns (A–U) populate correctly.
+
+---
+
+## [2026-05-27] — feat: add Instagram URL extraction to prospecting pipeline
+
+**Files Added:** `pipeline/social.py`
+**Files Modified:** `google_sheets.py`, `main.py`, `pipeline/__init__.py`
+
+### What Changed
+
+**pipeline/social.py — New file**
+- New module `extract_instagram_url(website_url: str) -> str` that fetches a business
+  website and scans the HTML for any `href` containing `instagram.com/`.
+- Uses `requests` with a 5-second timeout and a realistic `User-Agent` header to reduce
+  bot-detection blocks.
+- Extracts the matched URL, prepends `https://` if no scheme is present, and strips
+  trailing slashes for consistent formatting.
+- Returns empty string on any exception (timeout, connection error, HTTP error) —
+  never propagates an error into the main pipeline.
+- Logs `WARNING`-level messages when a site is unreachable or times out.
+
+**google_sheets.py — Column layout (A–U → A–V)**
+- Appended one new column to the END of `SHEET_COLUMNS` (position 22, column V):
+  `"Instagram URL"` — extracted from the business website; auto-populated on creation.
+- Updated `_LAST_COL` from `"U"` to `"V"` (22 columns total: A through V).
+- Updated module docstring column layout table to include column V with description.
+- Added `prospect.get("instagram_url", "")` to the end of `prospect_to_sheet_row()`.
+
+**main.py — Instagram extraction in the enrichment loop**
+- After `enrich_with_score()`, conditionally calls `extract_instagram_url()` for each
+  new prospect that has a `website` field.
+- Prospects without a website get `instagram_url = ""` without any network call.
+- Import of `pipeline.social` is kept inline (inside the loop) to avoid circular-import
+  issues during module initialization.
+
+**main.py — `print_summary()` Instagram coverage block**
+- Added an "Instagram URL Coverage" section between Website Coverage and Lead Score
+  Distribution, showing count and percentage of new prospects with an Instagram URL.
+
+**pipeline/__init__.py**
+- Updated module list docstring to include `social.py`.
+
+### Column Safety
+- Columns A through U are completely unchanged — all existing rows are unaffected.
+- Column V will be empty for all existing rows; new prospects auto-populate it when
+  a website is present and the site links to Instagram.
+
+### Verification Steps
+```
+cd ~/growth_agency/internal-tools/service-business-prospecting-assistant
+source .venv/bin/activate
+python3 main.py --zip 11375 --radius 5
+```
+Confirm:
+1. New column V header `Instagram URL` appears in Google Sheet.
+2. Businesses with websites that link Instagram show the URL in column V.
+3. Businesses without a website show an empty string in column V.
+4. Console report includes "Instagram URL Coverage" section.
+5. Pipeline runtime is not significantly slower (5-second cap per site).
+
+### Anything To Watch
+- Best-effort only: not every business links Instagram from their homepage.
+- Sites using JavaScript-rendered links (React/Vue SPAs) will not have the link
+  in the initial HTML response — `extract_instagram_url` only parses the raw response body.
+- The 5-second timeout means slow sites are skipped rather than stalling the run.
+- Businesses with no website will always return empty — this is intentional.
+
+---
+
 ## [2026-05-21] — feat: add search params, date tracking columns, and expanded status options
 
 **Files Modified:** `google_sheets.py`, `main.py`

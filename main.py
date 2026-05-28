@@ -239,6 +239,10 @@ def main() -> None:
         prospect["search_radius"] = args.radius
 
         enriched = enrich_with_score(prospect, category_lookup)
+
+        # Instagram extraction is disabled — column preserved for manual entry.
+        enriched["instagram_url"] = ""
+
         new_prospects.append(enriched)
         # Update index in-memory so later prospects in this run are checked
         # against prospects already accepted earlier in the same batch.
