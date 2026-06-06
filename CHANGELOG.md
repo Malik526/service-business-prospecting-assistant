@@ -2,6 +2,85 @@
 
 ---
 
+## [2026-06-06] — feat: add parallel email extraction to prospecting pipeline
+
+**Files Modified:** `pipeline/social.py`, `google_sheets.py`, `main.py`
+
+### What Changed
+
+**pipeline/social.py — new `extract_email()` function**
+- Added `extract_email(website_url: str) -> str` directly below `extract_instagram_url()`.
+- Two-pass strategy: fetches the homepage first, then `/contact` as a fallback.
+- Within each page, checks `mailto:` href links before falling back to plain-text
+  email-pattern scanning — mailto links are the most authoritative signal.
+- Filters out framework/platform emails via `_IGNORE_EMAIL_DOMAINS` list:
+  `sentry.io`, `wixpress.com`, `squarespace.com`, `wordpress.com`, `example.com`,
+  `googleapis.com`, `schema.org`, `w3.org`.
+- Skips `noreply@` and `no-reply@` prefixes — never a business contact.
+- Hard 4-second timeout per HTTP request (`_EMAIL_TIMEOUT = 4`) shared with
+  `_USER_AGENT` already defined in the module.
+- Never raises exceptions — all errors are caught and logged at WARNING level;
+  empty string returned on any failure.
+- Updated module docstring to describe both extractors and note thread-safety.
+
+**google_sheets.py — Email column added (W)**
+- Appended `"Email"` to the end of `SHEET_COLUMNS` (position 23, column W).
+- Updated `_LAST_COL` from `"V"` to `"W"` (23 columns total: A through W).
+- Updated module docstring column layout table to include column W with description.
+- Added `prospect.get("email", "")` to the end of `prospect_to_sheet_row()`.
+
+**main.py — Parallel extraction replacing sequential stub**
+- Added `import logging`, `import time`, and
+  `from concurrent.futures import ThreadPoolExecutor, as_completed` at the top.
+- Added `logger = logging.getLogger(__name__)` at module level.
+- Removed `enriched["instagram_url"] = ""` stub from the deduplication loop.
+- After the loop, new parallel extraction block:
+  - Filters to `prospects_with_sites` (those with a `website` field).
+  - Defines `enrich_prospect()` — calls both `extract_email()` and
+    `extract_instagram_url()` for one prospect; import kept inline to avoid
+    circular-import issues.
+  - Runs with `ThreadPoolExecutor(max_workers=10)` — up to 10 sites in flight
+    at once, bounded by `as_completed(timeout=180)`.
+  - Hard 3-minute ceiling (`EXTRACTION_TIMEOUT = 180`): if elapsed time exceeds
+    the ceiling, logs a warning, shuts the executor down without waiting, and
+    breaks — partial results are kept and written to the sheet.
+  - Fallback loop sets `email = ""` and `instagram_url = ""` on any prospect
+    that wasn't reached before the ceiling.
+  - Logs summary counts on completion: `emails: N, instagram: N`.
+- `print_summary()` updated:
+  - Docstring updated to list the new "Contact data extraction results" section.
+  - New "Contact Data Extraction" block printed between Website Coverage and
+    Lead Score Distribution showing:
+    `Emails found: X / Y prospects with websites`
+    `Instagram URLs: X / Y prospects with websites`
+
+### Column Safety
+- Columns A through V are completely unchanged — all existing rows are unaffected.
+- Column W (`Email`) will be empty for all existing rows; new prospects
+  auto-populate it when the website has a publicly listed contact email.
+
+### Why Parallel
+Per-prospect HTTP fetches ran sequentially in the previous Instagram extractor,
+adding 0–5 seconds per site and causing SSL timeout failures at scale (60+ prospects).
+This implementation runs both extractors concurrently with a hard ceiling so the
+total pipeline time grows by at most 3 minutes regardless of prospect count.
+
+### Verification Steps
+```
+cd ~/growth_agency/internal-tools/service-business-prospecting-assistant
+source .venv/bin/activate
+python3 main.py --zip 11375 --radius 5
+```
+Confirm:
+1. Pipeline completes in under 5 minutes total.
+2. No hanging or indefinite waits — each request caps at 4 seconds.
+3. New column W header `Email` appears in Google Sheet.
+4. Businesses with publicly listed emails populate column W.
+5. Console report shows `Contact Data Extraction` section with counts.
+6. All other columns (A–V) and pipeline stages are unaffected.
+
+---
+
 ## [2026-05-27] — chore: disable Instagram URL extraction; preserve column for manual entry
 
 **Files Modified:** `main.py`, `pipeline/social.py`
