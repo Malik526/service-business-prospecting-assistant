@@ -2,6 +2,94 @@
 
 ---
 
+## [2026-06-06] — feat: add backfill_emails.py — parallel email enrichment for existing sheet rows
+
+**Files Added:** `backfill_emails.py`
+
+### What This Script Does
+One-shot enrichment tool for the existing Google Sheet. Reads all prospect rows,
+identifies rows where the Website column is populated but the Email column is empty,
+runs `extract_email()` on all matching websites in parallel, and writes the results
+back to the sheet in a single batch API call.
+
+### Script Structure
+
+**`parse_args()`**
+- Accepts one optional flag: `--dry-run`.
+- Dry-run mode runs the full extraction but prints what would be written instead
+  of sending any API write calls.
+
+**`read_all_rows()`**
+- Uses `sheets_client.service.spreadsheets().values().get()` with `A:Z` range so
+  it captures all columns regardless of sheet width.
+- Exits cleanly with a printed error message on any `HttpError` or unexpected
+  exception — never crashes with a raw traceback.
+
+**`find_column_indices()`**
+- Dynamically resolves `"Website"` and `"Email"` column indices from the live
+  header row, so the script continues to work correctly if columns are reordered
+  or new columns are added.
+- Exits with a clear error if either column is missing.
+
+**`build_enrichment_queue()`**
+- Pads short rows to the full header width before index access (avoids
+  `IndexError` on rows with trailing empty cells).
+- Returns only rows where `website` is non-empty AND `email` is empty —
+  never overwrites existing email values.
+- `row_index` is the correct 1-based Sheets row number (`i + 2`:
+  +1 for the header row, +1 for 0-based list index).
+
+**`extract_emails_parallel()`**
+- `ThreadPoolExecutor(max_workers=10)` — up to 10 sites in flight at once.
+- Hard 10-minute ceiling via `as_completed(timeout=600)`. On `TimeoutError`,
+  the executor is shut down without waiting and partial results are returned —
+  never hangs the terminal.
+- Prints progress every 10 rows so the user can see it's working.
+
+**`build_batch_payload()`**
+- Converts `row_index → email` results into Sheets `batchUpdate` data format.
+- Uses `string.ascii_uppercase[email_col]` to derive the column letter (Email
+  is column W, index 22 — safely within the A–Z range).
+- Only includes rows with a non-empty email so no blank cells are written.
+
+**`write_batch()`**
+- Sends one `batchUpdate` API call for all results — O(1) API calls regardless
+  of how many rows are updated.
+- Retries once on failure with a 2-second pause before the second attempt.
+- Returns `True`/`False` so the caller can print an appropriate message.
+
+**`print_summary()`**
+- Prints total prospects, prospects with website, skipped count, emails found,
+  success rate, and still-empty count.
+- Appends `(DRY RUN)` to the header line when applicable.
+
+### Run Commands
+```
+cd ~/growth_agency/internal-tools/service-business-prospecting-assistant
+source .venv/bin/activate
+
+python3 backfill_emails.py            # live run
+python3 backfill_emails.py --dry-run  # preview only
+```
+
+### What Is Not Overwritten
+- Rows that already have an email in column W are excluded from the queue
+  before any network calls are made.
+- Rows with no website are skipped entirely.
+- The batch payload only contains entries where `extract_email()` returned a
+  non-empty string — blank results are never written.
+
+### Verification Steps
+1. Run `--dry-run` first to confirm the queue size and preview emails.
+2. Run live and confirm the console shows `Wrote N emails to sheet`.
+3. In the Google Sheet, spot-check column W for several rows:
+   - Rows with a website and previously empty email → populated.
+   - Rows without a website → unchanged.
+   - Rows that already had an email → unchanged.
+4. Row numbers in column W must match the correct business rows — no off-by-one.
+
+---
+
 ## [2026-06-06] — feat: add parallel email extraction to prospecting pipeline
 
 **Files Modified:** `pipeline/social.py`, `google_sheets.py`, `main.py`
