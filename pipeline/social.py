@@ -1,21 +1,20 @@
 """social.py
 
-Social media URL extractor for the prospecting pipeline.
-Takes a business website URL and attempts to find their Instagram profile
-link by scanning the page HTML.
+Contact and social media URL extractors for the prospecting pipeline.
+Takes a business website URL and attempts to:
+  - extract_email(): find a publicly listed contact email via mailto: links and
+    plain-text pattern matching; falls back to the /contact page if the homepage
+    has no address.
+  - extract_instagram_url(): find the business Instagram profile link by scanning
+    page HTML for any href containing instagram.com/.
 
-Returns Instagram URL if found, empty string if not.
-Handles timeouts and errors gracefully — never crashes the pipeline if a
-site is unreachable.
+Both functions return an empty string on any failure and never raise exceptions.
+All HTTP requests are capped at 4 seconds so neither function can stall the pipeline.
+Designed to run inside a ThreadPoolExecutor — stateless and safe for parallel calls.
 
 Dependencies:
     - requests >= 2.31.0
 """
-
-# Instagram URL extraction is currently disabled in the main pipeline due to
-# performance impact at scale. Re-enable when processing volume justifies it.
-# To re-enable: import and call extract_instagram_url() in main.py after
-# prospect enrichment.
 
 from __future__ import annotations
 
@@ -78,3 +77,93 @@ def extract_instagram_url(website_url: str) -> str:
     instagram_url = instagram_url.rstrip("/")
 
     return instagram_url
+
+
+# Hard limit on individual HTTP requests — never wait longer than this.
+_EMAIL_TIMEOUT = 4
+
+# Domains whose email addresses are never real business contacts.
+_IGNORE_EMAIL_DOMAINS = [
+    "sentry.io",
+    "wixpress.com",
+    "squarespace.com",
+    "wordpress.com",
+    "example.com",
+    "googleapis.com",
+    "schema.org",
+    "w3.org",
+]
+
+# Matches any string that looks like an email address.
+_EMAIL_PATTERN = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+
+
+def extract_email(website_url: str) -> str:
+    """Extract a publicly listed contact email from a business website.
+
+    Strategy:
+      1. Fetch the homepage — scan for mailto: links first (most reliable),
+         then fall back to plain-text email pattern matching.
+      2. If no address is found on the homepage, repeat the scan on /contact.
+      3. Return the first valid business email found.
+      4. Return empty string on any failure.
+
+    Never raises exceptions. Never waits more than 4 seconds per request.
+
+    Args:
+        website_url: Business website URL from Google Places.
+
+    Returns:
+        Email string or empty string if not found.
+    """
+    if not website_url:
+        return ""
+
+    headers = {"User-Agent": _USER_AGENT}
+
+    def _is_valid_business_email(email: str) -> bool:
+        """Return True if the email looks like a real business contact address."""
+        lower = email.lower()
+        if any(domain in lower for domain in _IGNORE_EMAIL_DOMAINS):
+            return False
+        if lower.startswith("noreply") or lower.startswith("no-reply"):
+            return False
+        return True
+
+    def _extract_from_html(html: str) -> str:
+        """Return the first valid business email found in an HTML string."""
+        # mailto: links are the most authoritative — check them first.
+        for email in re.findall(r"mailto:(" + _EMAIL_PATTERN + r")", html):
+            if _is_valid_business_email(email):
+                return email
+        # Fall back to bare email addresses in the page body.
+        for email in re.findall(_EMAIL_PATTERN, html):
+            if _is_valid_business_email(email):
+                return email
+        return ""
+
+    def _fetch_html(url: str) -> str:
+        """Fetch a URL and return the response body; empty string on any error."""
+        try:
+            resp = requests.get(url, timeout=_EMAIL_TIMEOUT, headers=headers, allow_redirects=True)
+            return resp.text
+        except requests.exceptions.Timeout:
+            logger.warning("Timeout fetching %s for email — skipping.", url)
+            return ""
+        except requests.exceptions.ConnectionError:
+            logger.warning("Unreachable: %s — skipping email extraction.", url)
+            return ""
+        except Exception as exc:
+            logger.warning("Email extraction failed for %s: %s", url, exc)
+            return ""
+
+    # --- Homepage pass ---
+    html = _fetch_html(website_url)
+    email = _extract_from_html(html)
+    if email:
+        return email
+
+    # --- /contact fallback ---
+    contact_url = website_url.rstrip("/") + "/contact"
+    html = _fetch_html(contact_url)
+    return _extract_from_html(html)

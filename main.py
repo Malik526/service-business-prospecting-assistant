@@ -22,9 +22,14 @@ Responsibilities deliberately kept out of this module:
 from __future__ import annotations
 
 import argparse
+import logging
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from categories import TARGET_CATEGORIES
+
+logger = logging.getLogger(__name__)
 from config import load_config, validate_config
 from dedupe import add_to_index, build_dedupe_index, is_duplicate
 from google_places import GooglePlacesClient
@@ -76,6 +81,7 @@ def print_summary(
       - Run parameters (ZIP, radius)
       - Counts (found, duplicates skipped, new records added)
       - Website coverage breakdown
+      - Contact data extraction results (emails, Instagram URLs)
       - Lead score distribution (average, range)
       - Closest businesses by distance
       - Highest review count businesses
@@ -114,6 +120,17 @@ def print_summary(
     print(sep)
     print(f"  With website:    {len(with_website):>4}  ({pct_with:.1f}%)")
     print(f"  No website:      {len(without_website):>4}  ({pct_without:.1f}%)")
+
+    # --- Contact data extraction results ---
+    sites_total = len(with_website)
+    emails_found = sum(1 for p in with_website if p.get("email"))
+    instagram_found = sum(1 for p in with_website if p.get("instagram_url"))
+
+    print(f"\n{sep}")
+    print("  Contact Data Extraction")
+    print(sep)
+    print(f"  Emails found:    {emails_found:>4} / {sites_total} prospects with websites")
+    print(f"  Instagram URLs:  {instagram_found:>4} / {sites_total} prospects with websites")
 
     # --- Lead score stats ---
     scores = [safe_int(p.get("lead_score", 0)) for p in added]
@@ -240,13 +257,63 @@ def main() -> None:
 
         enriched = enrich_with_score(prospect, category_lookup)
 
-        # Instagram extraction is disabled — column preserved for manual entry.
-        enriched["instagram_url"] = ""
-
         new_prospects.append(enriched)
         # Update index in-memory so later prospects in this run are checked
         # against prospects already accepted earlier in the same batch.
         add_to_index(enriched, dedupe_index)
+
+    # --- Parallel contact-data extraction ---
+    # Email and Instagram are fetched concurrently with a hard 3-minute ceiling
+    # so the pipeline never hangs regardless of site responsiveness.
+    prospects_with_sites = [p for p in new_prospects if p.get("website")]
+
+    if prospects_with_sites:
+        logger.info(
+            "Extracting contact data for %d prospects...",
+            len(prospects_with_sites),
+        )
+
+        EXTRACTION_TIMEOUT = 180  # Hard ceiling — never run longer than 3 minutes total
+        start_time = time.time()
+
+        def enrich_prospect(prospect: dict[str, Any]) -> dict[str, Any]:
+            """Fetch email and Instagram URL for a single prospect in parallel."""
+            from pipeline.social import extract_email, extract_instagram_url
+
+            website = prospect.get("website", "")
+            prospect["email"] = extract_email(website)
+            prospect["instagram_url"] = extract_instagram_url(website)
+            return prospect
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = {executor.submit(enrich_prospect, p): p for p in prospects_with_sites}
+
+            for future in as_completed(futures, timeout=EXTRACTION_TIMEOUT):
+                if time.time() - start_time > EXTRACTION_TIMEOUT:
+                    logger.warning(
+                        "Extraction time limit reached — stopping early with partial results"
+                    )
+                    executor.shutdown(wait=False)
+                    break
+                try:
+                    future.result()
+                except Exception as exc:
+                    logger.warning("Enrichment failed: %s", exc)
+
+        emails_found = sum(1 for p in prospects_with_sites if p.get("email"))
+        instagram_found = sum(1 for p in prospects_with_sites if p.get("instagram_url"))
+        logger.info(
+            "Extraction complete — emails: %d, instagram: %d",
+            emails_found,
+            instagram_found,
+        )
+
+    # Ensure every prospect has both keys so sheet row serialization is safe.
+    for p in new_prospects:
+        if "email" not in p:
+            p["email"] = ""
+        if "instagram_url" not in p:
+            p["instagram_url"] = ""
 
     sheets_client.append_prospects(new_prospects)
     print_summary(args.zip_code, args.radius, len(prospects), duplicate_count, new_prospects)
