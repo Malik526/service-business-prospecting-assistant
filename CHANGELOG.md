@@ -2,6 +2,82 @@
 
 ---
 
+## [2026-06-06] — fix: rewrite backfill_emails.py to prevent hangs at high volume
+
+**Files Modified:** `backfill_emails.py`
+
+### Root Cause
+The original script submitted all futures (up to 1100+) to one `ThreadPoolExecutor`
+at once and waited for them under a single 10-minute ceiling. When slow or hanging
+sites accumulated, the OS exhausted its socket quota and new connections stalled
+indefinitely. The `requests` timeout parameter controls read/write timeouts but
+does not reliably cancel an SSL handshake that never completes — so individual
+workers hung without triggering the Python-level timeout, eventually blocking the
+entire executor.
+
+### Fix 1 — Socket-level timeout (`socket.setdefaulttimeout(5)`)
+Added at module level, before any network calls. This catches connection hangs
+that occur at the SSL handshake stage before `requests` even takes over. Acts as
+a hard OS-level safety net regardless of what the HTTP layer does.
+
+### Fix 2 — Reduced workers from 10 → 5
+Fewer concurrent workers means fewer simultaneous open sockets, which reduces
+the chance of hitting OS-level socket exhaustion on a large backfill run.
+
+### Fix 3 — Batch processing (BATCH_SIZE = 50)
+Instead of submitting all rows at once, the script now processes 50 rows per
+`ThreadPoolExecutor` context. Each batch has its own `as_completed(timeout=60)`
+and `future.result(timeout=5)` double guard:
+- `as_completed(timeout=60)` — entire batch must complete in 60 seconds
+  (1.2 seconds average per site).
+- `future.result(timeout=5)` — individual future result() call safety cap.
+- On `TimeoutError`, remaining futures in the batch are marked as attempted
+  (empty string) and the loop continues with the next batch.
+
+### Fix 4 — Write immediately after each batch
+The original script collected all results then wrote at the very end. If it
+hung, all collected emails were lost. Now `write_batch_results()` is called
+after every batch of 50, so at most 50 rows' results can be lost on interrupt.
+Each write call creates a fresh `GoogleSheetsClient` to prevent stale SSL
+connections from accumulating over a long multi-batch run.
+
+### Fix 5 — Checkpoint + `--resume` flag
+A JSON checkpoint file (`backfill_checkpoint.json`) is saved after every
+successful batch write. It stores the set of all attempted row indices
+(both found and not-found). `--resume` loads this file and filters the
+enrichment queue to skip already-processed rows, so the script can be
+interrupted with Ctrl+C and restarted from where it stopped.
+
+### New constants
+| Name | Value | Purpose |
+|---|---|---|
+| `CHECKPOINT_FILE` | `backfill_checkpoint.json` | Persists progress across runs |
+| `BATCH_SIZE` | `50` | Rows per executor context |
+| `_MAX_WORKERS` | `5` | Parallel threads per batch |
+| `_BATCH_TIMEOUT` | `60` | Seconds ceiling per batch |
+| `_FUTURE_TIMEOUT` | `5` | Per-future `result()` cap |
+
+### New functions
+- `load_checkpoint(resume: bool) → set[int]` — reads checkpoint file when `--resume` is passed
+- `save_checkpoint(completed_rows: set[int])` — writes checkpoint file after each batch
+- `extract_batch(batch) → dict[int, str]` — runs one batch with all timeout guards
+- `write_batch_results(results, email_col, config) → int` — writes one batch; fresh client per attempt
+- `_make_sheets_client(config)` — creates a fresh `GoogleSheetsClient` (used by write and read)
+
+### Run commands
+```
+python3 backfill_emails.py             # fresh run
+python3 backfill_emails.py --dry-run   # preview only, no writes
+python3 backfill_emails.py --resume    # continue from checkpoint
+```
+
+### Expected performance for 1105 rows
+- ~22 batches × ~60s max per batch = under 22 minutes worst case
+- Typical (most sites respond in < 4s): 5–10 minutes total
+- Checkpoint saves after every batch — safe to Ctrl+C and resume at any point
+
+---
+
 ## [2026-06-06] — feat: add backfill_emails.py — parallel email enrichment for existing sheet rows
 
 **Files Added:** `backfill_emails.py`
