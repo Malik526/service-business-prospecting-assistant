@@ -25,7 +25,13 @@ import socket
 import string
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    TimeoutError as FuturesTimeoutError,
+    as_completed,
+)
+from multiprocessing import Process, Queue
+from queue import Empty
 from typing import Any
 
 from googleapiclient.errors import HttpError
@@ -52,6 +58,9 @@ _BATCH_TIMEOUT = 60
 
 # Per-future result() timeout — safety net on top of requests' 4s timeout.
 _FUTURE_TIMEOUT = 5
+
+# Hard timeout for one website email extraction process.
+_EMAIL_PROCESS_TIMEOUT = 10
 
 # Retry limit for each batch write call.
 _WRITE_RETRIES = 1
@@ -167,16 +176,56 @@ def build_enrichment_queue(
     first data row = row 2). Short rows are padded before index access.
     """
     queue = []
+    business_col = (
+        headers.index("Business Name")
+        if "Business Name" in headers
+        else None
+    )
     for i, row in enumerate(data_rows):
         padded = row + [""] * (len(headers) - len(row))
         website = padded[website_col].strip()
         email = padded[email_col].strip()
         if website and not email:
-            queue.append({"row_index": i + 2, "website": website})
+            business_name = padded[business_col].strip() if business_col is not None else ""
+            queue.append({
+                "row_index": i + 2,
+                "business_name": business_name,
+                "website": website,
+            })
     return queue
 
 
 # --- Extraction ---
+
+def _extract_email_process(website: str, result_queue: Queue) -> None:
+    """Run extract_email() in a child process and return the email through a queue."""
+    try:
+        result_queue.put(extract_email(website))
+    except Exception:
+        result_queue.put("")
+
+
+def _extract_email_with_process_timeout(website: str) -> str:
+    """Run extract_email() with a killable process-level timeout."""
+    result_queue: Queue = Queue(maxsize=1)
+    process = Process(target=_extract_email_process, args=(website, result_queue))
+    process.daemon = True
+    process.start()
+    process.join(_EMAIL_PROCESS_TIMEOUT)
+
+    if process.is_alive():
+        process.terminate()
+        process.join(1)
+        if process.is_alive():
+            process.kill()
+            process.join()
+        return ""
+
+    try:
+        return result_queue.get_nowait()
+    except Empty:
+        return ""
+
 
 def extract_batch(batch: list[dict[str, Any]]) -> dict[int, str]:
     """Run extract_email() in parallel for one batch; return row_index → email.
@@ -189,9 +238,11 @@ def extract_batch(batch: list[dict[str, Any]]) -> dict[int, str]:
 
     def _enrich(item: dict[str, Any]) -> tuple[int, str]:
         """Extract email for one row and return (row_index, email)."""
-        return item["row_index"], extract_email(item["website"])
+        return item["row_index"], _extract_email_with_process_timeout(item["website"])
 
-    with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
+    executor = ThreadPoolExecutor(max_workers=_MAX_WORKERS)
+    timed_out = False
+    try:
         futures = {executor.submit(_enrich, item): item for item in batch}
 
         try:
@@ -202,13 +253,25 @@ def extract_batch(batch: list[dict[str, Any]]) -> dict[int, str]:
                 except Exception:
                     # Record the row as attempted with no result.
                     results[futures[future]["row_index"]] = ""
-        except TimeoutError:
-            # Batch ceiling hit — mark any unfinished rows as attempted.
-            remaining = len(batch) - len(results)
-            print(f"  Warning: batch timed out — {remaining} row(s) marked as attempted.")
-            for item in futures.values():
-                if item["row_index"] not in results:
-                    results[item["row_index"]] = ""
+        except FuturesTimeoutError:
+            timed_out = True
+            unfinished = [
+                (future, item)
+                for future, item in futures.items()
+                if not future.done()
+            ]
+            print(
+                f"  Batch timeout: {len(unfinished)} unfinished futures. "
+                "Skipping unfinished websites."
+            )
+            for future, item in unfinished:
+                row_index = item["row_index"]
+                business_name = item.get("business_name") or "[unknown business]"
+                website = item["website"]
+                print(f"    Skipped row {row_index}: {business_name} — {website}")
+                future.cancel()
+    finally:
+        executor.shutdown(wait=not timed_out, cancel_futures=timed_out)
 
     return results
 

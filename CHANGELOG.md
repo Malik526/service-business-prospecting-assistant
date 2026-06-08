@@ -2,6 +2,31 @@
 
 ---
 
+## [2026-06-08] — fix: handle backfill batch timeouts gracefully
+
+**Files Modified:** `backfill_emails.py`
+
+### Summary
+Patched `extract_batch()` so `as_completed(..., timeout=_BATCH_TIMEOUT)` no
+longer crashes the script when a batch has unfinished futures. Timed-out batches
+now log unfinished row index, business name, and website, cancel unfinished
+futures where possible, and return partial completed results.
+
+### Additional Guard
+Wrapped `extract_email()` calls in a killable process-level timeout so a wedged
+website parse cannot keep a worker thread alive forever after the batch timeout
+path runs.
+
+### Verification
+- `python3 -m py_compile backfill_emails.py`
+- Local synthetic timeout test confirmed the expected message:
+  `Batch timeout: 3 unfinished futures. Skipping unfinished websites.`
+- The requested live `python3 backfill_emails.py --dry-run` and
+  `python3 backfill_emails.py` commands could not be completed because the
+  escalated network run was blocked by the platform usage limit.
+
+---
+
 ## [2026-06-08] — docs: diagnose backfill_emails.py hang report
 
 **Files Added:** `backfill_diagnosis.txt`
