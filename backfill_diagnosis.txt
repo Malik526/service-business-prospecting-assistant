@@ -1,0 +1,169 @@
+BACKFILL DIAGNOSIS REPORT
+==================================================
+
+Generated: 2026-06-08 18:43 EDT
+
+SCOPE
+--------------------------------------------------
+Investigate why backfill_emails.py was reported to hang around row 300.
+No fixes were applied to backfill_emails.py or pipeline/social.py.
+
+SYMPTOM
+--------------------------------------------------
+Reported behavior:
+- 1105 total prospects to enrich.
+- Hangs consistently around row 300.
+- Checkpoint resume gets past row 300, then hangs again at a different point.
+- Batch size is 50.
+- ThreadPoolExecutor max_workers is 5 or 10.
+
+LIVE PROCESS / DEBUG LOG CHECK
+--------------------------------------------------
+No live backfill_emails.py process was running during this investigation.
+No backfill_debug.log file exists in the project directory.
+
+Because there was no stuck live process and no START/END debug log, the exact
+currently-hanging URL could not be identified using the requested "START with
+no END" method.
+
+HANGING URL
+--------------------------------------------------
+Exact hanging URL: not available from current evidence.
+
+Best row-300 candidate from the sheet:
+https://newyorkcityelectricianss.com/
+
+REQUESTS TIMEOUT TEST
+--------------------------------------------------
+Tested row 300 candidate:
+https://newyorkcityelectricianss.com/
+
+Result without socket.setdefaulttimeout:
+Response: 200 in 0.30s
+
+Conclusion:
+requests.get(timeout=4) worked for this URL during this investigation.
+The reported row-300 hang did not reproduce against this URL.
+
+SOCKET TIMEOUT TEST
+--------------------------------------------------
+Tested row 300 candidate with socket.setdefaulttimeout(4):
+OK: 200 in 0.14s
+
+Conclusion:
+Socket-level timeout also worked for this URL during this investigation.
+This test did not prove a requests timeout bypass for the row-300 candidate.
+
+ROW 290-320 WEBSITE CHECK
+--------------------------------------------------
+Websites around row 290-320:
+Row 292: https://americanhvac.nyc/locations/brooklyn-ny/
+Row 293: https://www.oakeventproduction.com/
+Row 294: https://onehourpc.com/?y_source=1_OTcyOTAyNjQtNzE1LWxvY2F0aW9uLndlYnNpdGU%3D
+Row 295: https://www.chefaniasgourmetcuisine.com/
+Row 296: http://www.nypestpro.com/
+Row 297: http://www.visioneventco.com/
+Row 298: https://feathersoulsfilms.com/
+Row 299: https://wonderfulspa.wixsite.com/10010
+Row 300: https://newyorkcityelectricianss.com/
+Row 301: https://pkelectricnyc.com/?utm_campaign=gmb
+Row 302: https://www.emrgmedia.com/?utm_source=google&utm_medium=organic&utm_campaign=gbp
+Row 303: https://videographerdrone.com/
+Row 304: https://www.davidgenik.com/
+Row 305: https://emmacleary.com/
+Row 306: http://www.priyanca.com/
+Row 307: https://www.orbaelectric.com/
+Row 308: https://www.visualgnome.com/
+Row 309: https://deborahmillercatering.com/
+Row 310: https://mackmediagroup.com/nyc-video-production/?utm_campaign=GMB&utm_medium=video_production_company_nyc
+Row 311: https://dolcemedicalspas.com/
+Row 312: https://nybuilt.com/
+Row 313: [empty]
+Row 314: https://greenislandcleaningservices.com/
+Row 315: https://form50fitness.com/?utm_campaign=gmbMidtown
+Row 316: https://www.zzmedspa.com/
+Row 317: https://organicpestcontrolnyc.com/
+Row 318: http://completebedbugexterminatingnyc.com/
+Row 319: https://sselectricianbrooklyn.com/
+Row 320: http://amykatzevents.com/
+Row 321: https://sjsevents.com/
+Row 322: http://www.bookcleany.com/
+
+ROW 290-320 REQUEST PROBE
+--------------------------------------------------
+Each non-empty row-window URL was tested with requests.get(timeout=4) under an
+outer process timeout. No URL in this window hung during the probe.
+
+Observed slower responses:
+- Row 293: 200 in 2.89s
+- Row 309: 200 in 3.34s
+- Row 314: 200 in 2.22s
+
+Observed unusual statuses:
+- Row 308: 403 in 0.42s
+- Row 310: 202 in 0.61s
+- Row 322: 202 in 0.27s
+
+All other tested URLs returned within 2 seconds.
+
+THREADPOOLEXECUTOR BEHAVIOR CHECK
+--------------------------------------------------
+Current HEAD already includes the proposed anti-hang architecture:
+- socket.setdefaulttimeout(5)
+- BATCH_SIZE = 50
+- _MAX_WORKERS = 5
+- as_completed(futures, timeout=_BATCH_TIMEOUT)
+- future.result(timeout=_FUTURE_TIMEOUT)
+- per-batch writes
+- checkpoint + --resume
+- fresh GoogleSheetsClient for writes
+
+Git history shows the original version at commit 661a756 submitted the full
+queue to one ThreadPoolExecutor and used future.result() without a timeout.
+That version could hang when one or more worker threads stalled below the
+requests timeout layer or when many slow sites accumulated socket pressure.
+
+Git history also shows commit 106833f ("fix: rewrite backfill_emails.py to
+prevent hangs at high volume") already changed the script to the current
+batched, guarded implementation.
+
+ROOT CAUSE HYPOTHESIS
+--------------------------------------------------
+The most likely root cause of the originally reported hang was the old
+ThreadPoolExecutor design, not a single consistently bad row-300 URL:
+- The original script submitted up to 1100+ futures at once.
+- It used one global as_completed(timeout=600) ceiling.
+- It called future.result() with no per-future timeout.
+- It only wrote to Sheets after extraction completed.
+- A worker stalled in DNS/TCP/SSL/read handling could keep the executor from
+shutting down cleanly.
+- With many pending futures, slow sites could accumulate and make the process
+appear to hang around whichever row was next in progress output.
+
+The report that --resume gets past row 300 and then hangs elsewhere supports
+this hypothesis: the problem follows the executor/network workload, not one
+specific row.
+
+CURRENT REPRODUCTION STATUS
+--------------------------------------------------
+The exact hang was not reproduced in this diagnostic session.
+No live stuck process was available to inspect.
+No debug START/END log was available.
+The row-300 candidate responded quickly.
+All row 292-322 websites responded within the requests timeout.
+
+RECOMMENDED FIX
+--------------------------------------------------
+No new fix is recommended from this run because the current checked-in
+backfill_emails.py already contains the expected fix pattern.
+
+Recommended next diagnostic step if a hang still occurs:
+1. Add explicit START/END logging around each _enrich() call with row_index,
+   website, monotonic timestamp, and thread name.
+2. Run the current script until it is stuck.
+3. While it is stuck, inspect START lines without END lines.
+4. Capture a Python stack dump with faulthandler or py-spy to determine whether
+   the process is blocked in extract_email(), executor shutdown, or Google
+   Sheets write/HTTP transport.
+5. Only then decide whether another fix is needed.
+

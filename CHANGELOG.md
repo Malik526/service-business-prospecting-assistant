@@ -2,6 +2,31 @@
 
 ---
 
+## [2026-06-08] — docs: diagnose backfill_emails.py hang report
+
+**Files Added:** `backfill_diagnosis.txt`
+
+### Summary
+Investigated the reported `backfill_emails.py` hang around row 300 without
+changing the backfill implementation. No live stuck process or `backfill_debug.log`
+was available, so the exact START-without-END URL could not be identified.
+
+### Findings
+- Read the live sheet row window around rows 290–320.
+- Tested the row-300 candidate (`https://newyorkcityelectricianss.com/`) with
+  `requests.get(timeout=4)` and with `socket.setdefaulttimeout(4)`; both returned
+  quickly.
+- Probed the row-window URLs with `requests.get(timeout=4)`; none hung during
+  the diagnostic run.
+- Confirmed current `backfill_emails.py` already contains the prior anti-hang
+  safeguards from commit `106833f`: socket timeout, batch processing, per-batch
+  timeout, per-future timeout, checkpointing, and fresh Sheets clients.
+
+### Output
+Full findings were written to `backfill_diagnosis.txt`.
+
+---
+
 ## [2026-06-06] — fix: rewrite backfill_emails.py to prevent hangs at high volume
 
 **Files Modified:** `backfill_emails.py`
