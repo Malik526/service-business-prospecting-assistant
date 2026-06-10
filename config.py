@@ -9,7 +9,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DEFAULT_SERVICE_ACCOUNT_FILE = "./credentials/service-account.json"
+# Shared service account key — used by all growth agency tools
+# Never commit this file to GitHub
+# Located at ~/growth_agency/credentials/service-account.json
+DEFAULT_SERVICE_ACCOUNT_FILE = os.path.expanduser(
+    "~/growth_agency/credentials/service-account.json"
+)
 
 
 @dataclass(frozen=True)
@@ -18,7 +23,7 @@ class Config:
     google_sheet_id: str
     google_service_account_file: str
     anthropic_api_key: str
-    sheet_name: str = "Prospects"
+    sheet_name: str = "PROSPECTS"
     max_pages_per_category: int = 3
 
 
@@ -31,7 +36,7 @@ def load_config() -> Config:
             DEFAULT_SERVICE_ACCOUNT_FILE,
         ).strip(),
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", "").strip(),
-        sheet_name=os.getenv("GOOGLE_SHEET_NAME", "Prospects").strip() or "Prospects",
+        sheet_name=os.getenv("GOOGLE_SHEET_NAME", "PROSPECTS").strip() or "PROSPECTS",
         max_pages_per_category=int(os.getenv("MAX_PAGES_PER_CATEGORY", "3")),
     )
 

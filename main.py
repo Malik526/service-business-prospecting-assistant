@@ -35,7 +35,7 @@ from dedupe import add_to_index, build_dedupe_index, is_duplicate
 from google_places import GooglePlacesClient
 from google_sheets import GoogleSheetsClient
 from scoring import score_prospect, weighted_reputation_score, why_good_fit
-from utils import safe_float, safe_int, today_iso
+from utils import safe_float, safe_int
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,7 +53,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def enrich_with_score(prospect: dict[str, Any], category_lookup: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """Add lead score, fit explanation, CRM status, and date to a prospect dict.
+    """Add score, fit explanation, and default PROSPECTS fields to a prospect.
 
     Mutates and returns the same dict. Called after deduplication so only
     new prospects are scored (avoids wasting compute on duplicates).
@@ -63,7 +63,8 @@ def enrich_with_score(prospect: dict[str, Any], category_lookup: dict[str, dict[
     prospect["weighted_reputation_score"] = weighted_reputation_score(prospect)
     prospect["why_good_fit"] = why_good_fit(prospect, category)
     prospect["status"] = "New"
-    prospect["date_added"] = today_iso()
+    prospect["last_contact_date"] = ""
+    prospect["last_outcome"] = ""
     prospect["notes"] = ""
     return prospect
 
@@ -74,6 +75,8 @@ def print_summary(
     found_count: int,
     duplicate_count: int,
     added: list[dict[str, Any]],
+    appended_count: int | None = None,
+    append_skipped_duplicates: int = 0,
 ) -> None:
     """Print a structured console report after a prospecting run.
 
@@ -101,7 +104,9 @@ def print_summary(
     print(sep)
     print(f"  Businesses found:       {found_count}")
     print(f"  Duplicates skipped:     {duplicate_count}")
-    print(f"  New businesses added:   {len(added)}")
+    print(f"  New businesses added:   {appended_count if appended_count is not None else len(added)}")
+    if append_skipped_duplicates:
+        print(f"  Append-time duplicates: {append_skipped_duplicates}")
 
     if not added:
         print(f"\n  No new prospects to report.")
@@ -315,8 +320,16 @@ def main() -> None:
         if "instagram_url" not in p:
             p["instagram_url"] = ""
 
-    sheets_client.append_prospects(new_prospects)
-    print_summary(args.zip_code, args.radius, len(prospects), duplicate_count, new_prospects)
+    append_result = sheets_client.append_prospects(new_prospects)
+    print_summary(
+        args.zip_code,
+        args.radius,
+        len(prospects),
+        duplicate_count,
+        new_prospects,
+        appended_count=append_result["appended"],
+        append_skipped_duplicates=append_result["skipped_duplicates"],
+    )
 
 
 if __name__ == "__main__":

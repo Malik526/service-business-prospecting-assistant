@@ -2,6 +2,31 @@
 
 ---
 
+## [2026-06-10 19:41 EDT] — fix: update prospect sheet append schema
+
+**Files Modified:** `google_sheets.py`, `main.py`, `config.py`, `README.md`
+
+### Summary
+Updated the prospecting assistant to write the new PROSPECTS schema with
+`Last Contact Date` and `Last Outcome`, removed the old exported `Date Added`
+column, and kept new rows append-only with `Status = New` by default.
+
+### Sheets Behavior
+- Added append-time Place ID checks inside `append_prospects()` so duplicate
+  Place IDs are skipped even if the upstream dedupe pass is bypassed.
+- Added non-strict dropdown validations for `Status` and `Last Outcome` on
+  rows 2-10000.
+- Added one-time schema normalization for older sheets so existing rows are
+  reshaped into the new column order without moving old notes into outcome
+  fields.
+
+### Verification
+- `python3 -m py_compile google_sheets.py main.py config.py`
+- Local mocked Sheets client check confirmed duplicate Place IDs are skipped
+  and the serialized row uses the new 21-column order.
+
+---
+
 ## [2026-06-08] — fix: handle backfill batch timeouts gracefully
 
 **Files Modified:** `backfill_emails.py`

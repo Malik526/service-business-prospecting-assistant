@@ -33,9 +33,13 @@ This MVP researches and organizes prospects only. It does not send outreach, gen
 | Lead Score | Heuristic priority score (1–10) — see Lead Score section below |
 | Why Good Fit | Short explanation of the scoring rationale |
 | Status | Current outreach status — dropdown controlled (see Status section below) |
-| Date Added | ISO date the record was added |
+| Last Contact Date | Manual date field for the most recent outreach attempt |
+| Last Outcome | Manual outcome field with dropdown suggestions |
 | Notes | Free-form notes field |
-| Weighted Reputation Score | Market-validation-oriented metric combining rating quality and review volume |
+| Search ZIP Code | ZIP code used for the prospecting run |
+| Search Radius (mi) | Search radius used for the prospecting run |
+| Instagram URL | Instagram URL extracted from the business website, when found |
+| Email | Email address extracted from the business website, when found |
 
 ---
 
@@ -148,9 +152,9 @@ Currently, all target categories have `crm_fit: True` because this tool is speci
 
 ---
 
-## Status Column
+## Status And Outcome Columns
 
-The Status column is a Google Sheets dropdown with restricted values. It represents the prospect's current stage in the outreach workflow.
+The Status and Last Outcome columns are Google Sheets dropdowns with suggested values. They are intentionally non-strict, so manual additions do not break the sheet.
 
 New records are automatically set to **New** when written by the script.
 
@@ -160,14 +164,22 @@ New records are automatically set to **New** when written by the script.
 | Reviewed | Manually reviewed; decision pending |
 | Good Fit | Confirmed strong outreach candidate |
 | Not Fit | Reviewed and ruled out |
-| Contacted | First outreach message sent |
-| Followed Up | At least one follow-up sent |
-| Interested | Prospect expressed interest in a conversation |
-| Meeting Booked | Discovery call or meeting scheduled |
-| Client | Converted to a paying client |
-| Not Interested | Prospect declined or unresponsive after follow-up |
+| Do Not Contact | Should not be contacted |
+| Not Interested | Prospect declined or should be deprioritized |
 
-The dropdown is applied automatically by the script on every run using the Google Sheets `setDataValidation` API. It is idempotent — re-applying it does not reset existing values.
+| Last Outcome | Meaning |
+|---|---|
+| Not Called Yet | No call has been attempted |
+| Answered - Interested | Prospect answered and showed interest |
+| Answered - Not Interested | Prospect answered and declined |
+| Answered - Hung Up | Prospect answered and ended the call |
+| Answered - Scheduled Demo | Demo or meeting was scheduled |
+| Voicemail Left | Call reached voicemail and a message was left |
+| Wrong Number | Listed number does not reach the business |
+| Business Closed | Business appears closed |
+| Do Not Call List | Prospect should not be called |
+
+The dropdowns are applied automatically by the script on every run using the Google Sheets `setDataValidation` API. Re-applying them does not reset existing values.
 
 ---
 
@@ -247,7 +259,7 @@ Copy `.env.example` to `.env`, then fill in the values:
 GOOGLE_PLACES_API_KEY=your_google_api_key
 GOOGLE_SHEET_ID=your_google_sheet_id
 GOOGLE_SERVICE_ACCOUNT_FILE=./credentials/service-account.json
-GOOGLE_SHEET_NAME=Prospects
+GOOGLE_SHEET_NAME=PROSPECTS
 MAX_PAGES_PER_CATEGORY=3
 ```
 
@@ -256,7 +268,7 @@ MAX_PAGES_PER_CATEGORY=3
 | `GOOGLE_PLACES_API_KEY` | API key used for Google Places and Geocoding requests |
 | `GOOGLE_SHEET_ID` | ID of the Google Sheet where prospects will be stored |
 | `GOOGLE_SERVICE_ACCOUNT_FILE` | Local path to the service account JSON file |
-| `GOOGLE_SHEET_NAME` | Tab name inside the Google Sheet. Defaults to `Prospects` |
+| `GOOGLE_SHEET_NAME` | Tab name inside the Google Sheet. Defaults to `PROSPECTS` |
 | `MAX_PAGES_PER_CATEGORY` | Number of Google Places result pages per category (each page ~20 results) |
 
 ---
@@ -297,7 +309,7 @@ Credential files should never be committed to GitHub. The project `.gitignore` e
 ## Google Sheets Setup
 
 1. Create a Google Sheet.
-2. Add a tab named `Prospects`, or set a different name via `GOOGLE_SHEET_NAME`.
+2. Add a tab named `PROSPECTS`, or set a different name via `GOOGLE_SHEET_NAME`.
 3. Copy the Sheet ID from the URL:
 
 ```
@@ -307,7 +319,7 @@ https://docs.google.com/spreadsheets/d/<GOOGLE_SHEET_ID>/edit
 4. Add the ID to `.env` as `GOOGLE_SHEET_ID`.
 5. Share the Google Sheet with the service account email address as an Editor.
 
-The tool will create and maintain the header row automatically. Status dropdown validation is applied on every run.
+The tool will create and maintain the header row automatically. Status and Last Outcome dropdown validation is applied on every run.
 
 ---
 

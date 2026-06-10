@@ -2,8 +2,8 @@
 
 This module handles all interaction with the Google Sheets API:
   - Ensuring the header row exists with the correct columns.
-  - Applying dropdown validation to the Status column so the sheet behaves
-    like a lightweight CRM with constrained status transitions.
+  - Migrating older prospect headers into the current PROSPECTS schema.
+  - Applying dropdown validation to controlled outreach columns.
   - Reading existing records for deduplication.
   - Appending new prospect rows.
 
@@ -12,7 +12,7 @@ must be shared with the service account email as an Editor — without this,
 reads and writes will fail with a 403 permission error even if authentication
 itself succeeds.
 
-Column Layout (A–W)
+Column Layout (A–U)
 -------------------
 A  Place ID
 B  Business Name
@@ -28,25 +28,25 @@ K  Source
 L  Lead Score
 M  Why Good Fit
 N  Status
-O  Date Added
-P  Notes
-Q  Weighted Reputation Score
+O  Last Contact Date        ← Manual outreach tracking
+P  Last Outcome             ← Manual outreach tracking
+Q  Notes
 R  Search ZIP Code          ← ZIP code used in the discovery run (auto-populated)
 S  Search Radius (mi)       ← Radius used in the discovery run (auto-populated)
-T  Date Contacted           ← Date of first outreach attempt (manual entry)
-U  Follow-Up Date           ← Date of next intended follow-up (manual entry)
-V  Instagram URL            ← Extracted from business website (auto-populated)
-W  Email                    ← Extracted from business website (auto-populated)
+T  Instagram URL            ← Extracted from business website (auto-populated)
+U  Email                    ← Extracted from business website (auto-populated)
 """
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
+logger = logging.getLogger(__name__)
 
 # Ordered list of column headers. The order here defines the column layout in
 # the Google Sheet and must match `prospect_to_sheet_row` exactly.
@@ -65,49 +65,47 @@ SHEET_COLUMNS = [
     "Lead Score",
     "Why Good Fit",
     "Status",
-    "Date Added",
+    "Last Contact Date",
+    "Last Outcome",
     "Notes",
-    "Weighted Reputation Score",
     "Search ZIP Code",        # Column R — ZIP used in the discovery run
     "Search Radius (mi)",     # Column S — radius used in the discovery run
-    "Date Contacted",         # Column T — date of first outreach attempt
-    "Follow-Up Date",         # Column U — date of next intended follow-up
-    "Instagram URL",          # Column V — extracted from business website (auto-populated)
-    "Email",                  # Column W — extracted from business website (auto-populated)
+    "Instagram URL",          # Column T — extracted from business website (auto-populated)
+    "Email",                  # Column U — extracted from business website (auto-populated)
 ]
 
 # Column letter of the last column, derived from SHEET_COLUMNS length.
 # Update this if columns are added or removed.
-_LAST_COL = "W"  # 23 columns: A through W
+_LAST_COL = "U"  # 21 columns: A through U
 
-# Allowed values for the Status dropdown. These represent the prospect's
-# current stage in the outreach workflow, from initial discovery to close.
-#
-# Stages in order:
-#   New          → Reviewed → Good Fit / Not Fit
-#   Good Fit     → Called → Contacted
-#   Contacted    → FollowUp 1 → FollowUp 2 → FollowUp 3
-#   FollowUp 3   → Interested → Demo Booked → Proposal Sent → Negotiating → Meeting Booked → Client
-#   Dead ends:   → Not Interested | Ghosted | Do Not Contact
+# Older releases wrote extra CRM/date/reputation columns through W. Read and
+# clear that full width during one-time schema normalization so old trailing
+# cells do not remain visible after the PROSPECTS header is written.
+_LEGACY_LAST_COL = "W"
+
+# Allowed values for the Status dropdown. Status now represents prospect
+# qualification only; call outcomes live in the Last Outcome column.
 STATUS_OPTIONS = [
-    "New",              # Just discovered, not yet reviewed
-    "Reviewed",         # Manually reviewed, decision pending
-    "Good Fit",         # Determined to be a strong outreach candidate
-    "Not Fit",          # Reviewed and ruled out
-    "Called",           # Phone call attempted — no answer or voicemail
-    "Contacted",        # First outreach sent — call, DM, or email
-    "FollowUp 1",       # First follow-up sent after initial contact
-    "FollowUp 2",       # Second follow-up sent
-    "FollowUp 3",       # Third follow-up — final attempt before closing
-    "Interested",       # Prospect expressed interest
-    "Demo Booked",      # Screen share or demo call scheduled
-    "Proposal Sent",    # Pricing and proposal sent to prospect
-    "Negotiating",      # In active conversation about terms
-    "Meeting Booked",   # Discovery call or meeting scheduled
-    "Client",           # Converted to paying client
-    "Not Interested",   # Prospect explicitly declined
-    "Ghosted",          # No response after 3+ follow-up attempts
-    "Do Not Contact",   # Requested no further outreach
+    "New",
+    "Reviewed",
+    "Good Fit",
+    "Not Fit",
+    "Do Not Contact",
+    "Not Interested",
+]
+
+# Allowed values for the Last Outcome dropdown. Validation is non-strict so
+# manual notes or future outcome names can be entered without breaking edits.
+LAST_OUTCOME_OPTIONS = [
+    "Not Called Yet",
+    "Answered - Interested",
+    "Answered - Not Interested",
+    "Answered - Hung Up",
+    "Answered - Scheduled Demo",
+    "Voicemail Left",
+    "Wrong Number",
+    "Business Closed",
+    "Do Not Call List",
 ]
 
 
@@ -133,22 +131,26 @@ class GoogleSheetsClient:
         """Write the header row if it is missing or incorrect, then apply validation.
 
         Reads the first row of the sheet and compares it against SHEET_COLUMNS.
-        If they don't match, the header is written. Status dropdown validation
-        is applied on every call — it is idempotent and ensures new runs always
-        have the correct dropdown even if the sheet was set up before this
-        feature was added.
+        If an older header is detected, existing rows are reshaped into the
+        current PROSPECTS schema so manual Status and Notes values stay in
+        their intended columns. Dropdown validation is applied on every call.
         """
-        values = self._get_values(f"{self.sheet_name}!A1:{_LAST_COL}1")
-        if not values or values[0] != SHEET_COLUMNS:
+        values = self._get_values(f"{self.sheet_name}!A1:{_LEGACY_LAST_COL}1")
+        current_header = values[0] if values else []
+
+        if current_header != SHEET_COLUMNS:
+            if current_header:
+                self._migrate_existing_rows(current_header)
             self.service.spreadsheets().values().update(
                 spreadsheetId=self.sheet_id,
                 range=f"{self.sheet_name}!A1:{_LAST_COL}1",
                 valueInputOption="RAW",
                 body={"values": [SHEET_COLUMNS]},
             ).execute()
+            self._clear_values(f"{self.sheet_name}!V:W")
 
-        # Apply Status dropdown validation every run (idempotent).
-        self.apply_status_dropdown()
+        # Apply dropdown validation every run (idempotent).
+        self.apply_dropdown_validations()
 
     def get_existing_records(self) -> list[dict[str, Any]]:
         """Read all existing data rows from the sheet and return as a list of dicts.
@@ -185,19 +187,47 @@ class GoogleSheetsClient:
                 return record
         return None
 
-    def append_prospects(self, prospects: list[dict[str, Any]]) -> None:
+    def append_prospects(self, prospects: list[dict[str, Any]]) -> dict[str, int]:
         """Append new prospect rows to the bottom of the sheet.
 
         Uses INSERT_ROWS mode so existing data is never overwritten.
-        Rows are written in the order they appear in `prospects`.
+        Existing Place IDs are queried immediately before append so duplicate
+        rows are skipped even if a caller did not run the upstream dedupe pass.
 
         Args:
             prospects: List of enriched prospect dicts (post-deduplication and scoring).
+
+        Returns:
+            Counts for appended rows and duplicate Place IDs skipped.
         """
         if not prospects:
-            return
+            return {"appended": 0, "skipped_duplicates": 0}
 
-        rows = [prospect_to_sheet_row(prospect) for prospect in prospects]
+        existing_place_ids = {
+            str(record.get("Place ID", "")).strip()
+            for record in self.get_existing_records()
+            if str(record.get("Place ID", "")).strip()
+        }
+
+        appendable = []
+        skipped_duplicates = 0
+        for prospect in prospects:
+            place_id = str(prospect.get("place_id", "")).strip()
+            if place_id and place_id in existing_place_ids:
+                skipped_duplicates += 1
+                continue
+            appendable.append(prospect)
+            if place_id:
+                existing_place_ids.add(place_id)
+
+        if not appendable:
+            logger.info(
+                "No new prospects appended. Skipped %d duplicate Place ID(s).",
+                skipped_duplicates,
+            )
+            return {"appended": 0, "skipped_duplicates": skipped_duplicates}
+
+        rows = [prospect_to_sheet_row(prospect) for prospect in appendable]
         self.service.spreadsheets().values().append(
             spreadsheetId=self.sheet_id,
             range=f"{self.sheet_name}!A:{_LAST_COL}",
@@ -206,47 +236,117 @@ class GoogleSheetsClient:
             body={"values": rows},
         ).execute()
 
-    def apply_status_dropdown(self) -> None:
-        """Apply a dropdown validation rule to the Status column for all data rows.
+        self.apply_dropdown_validations()
+        logger.info(
+            "Appended %d prospect(s). Skipped %d duplicate Place ID(s).",
+            len(appendable),
+            skipped_duplicates,
+        )
+        return {"appended": len(appendable), "skipped_duplicates": skipped_duplicates}
+
+    def apply_dropdown_validations(self) -> None:
+        """Apply dropdown validation rules to controlled PROSPECTS columns.
 
         Uses the Sheets batchUpdate API with a `setDataValidation` request.
-        The rule restricts the Status column (column N) to values in
-        STATUS_OPTIONS, displayed as a native Google Sheets dropdown.
+        Rules are applied to Status and Last Outcome for rows 2-10000.
 
         The validation covers rows 2–10000 (row 1 is the header). Applying
         this on every run is safe and idempotent — it does not reset existing
         cell values, only updates the validation rule.
 
-        `strict=True` means the Sheets UI will reject manually typed values
-        that are not in the list, enforcing workflow consistency.
+        `strict=False` keeps the dropdown suggestions visible while allowing
+        manual values that are not in the configured list.
         """
         sheet_gid = self._get_sheet_gid()
-        status_col_index = SHEET_COLUMNS.index("Status")
+        requests = [
+            self._validation_request(
+                sheet_gid=sheet_gid,
+                column_name="Status",
+                options=STATUS_OPTIONS,
+            ),
+            self._validation_request(
+                sheet_gid=sheet_gid,
+                column_name="Last Outcome",
+                options=LAST_OUTCOME_OPTIONS,
+            ),
+        ]
 
-        request = {
+        self.service.spreadsheets().batchUpdate(
+            spreadsheetId=self.sheet_id,
+            body={"requests": requests},
+        ).execute()
+
+    def _validation_request(
+        self,
+        sheet_gid: int,
+        column_name: str,
+        options: list[str],
+    ) -> dict[str, Any]:
+        """Build one Google Sheets data-validation request for a dropdown column."""
+        column_index = SHEET_COLUMNS.index(column_name)
+        return {
             "setDataValidation": {
                 "range": {
                     "sheetId": sheet_gid,
                     "startRowIndex": 1,       # Row 2 (0-indexed) — skip the header
                     "endRowIndex": 10000,     # Cover all foreseeable future rows
-                    "startColumnIndex": status_col_index,
-                    "endColumnIndex": status_col_index + 1,
+                    "startColumnIndex": column_index,
+                    "endColumnIndex": column_index + 1,
                 },
                 "rule": {
                     "condition": {
                         "type": "ONE_OF_LIST",
-                        "values": [{"userEnteredValue": s} for s in STATUS_OPTIONS],
+                        "values": [{"userEnteredValue": option} for option in options],
                     },
-                    "showCustomUi": True,   # Render as a native Sheets dropdown
-                    "strict": True,         # Reject values not in the list
+                    "showCustomUi": True,
+                    "strict": False,
                 },
             }
         }
 
-        self.service.spreadsheets().batchUpdate(
+    def _migrate_existing_rows(self, current_header: list[Any]) -> None:
+        """Reshape old sheet rows into the current PROSPECTS column order."""
+        normalized_header = [str(header).strip() for header in current_header]
+        legacy_markers = [
+            "Date Added",
+            "Weighted Reputation Score",
+            "Date Contacted",
+            "Follow-Up Date",
+        ]
+        if not any(header in normalized_header for header in legacy_markers):
+            return
+
+        old_rows = self._get_values(f"{self.sheet_name}!A2:{_LEGACY_LAST_COL}")
+        if not old_rows:
+            return
+
+        migrated_rows = []
+        for row in old_rows:
+            padded = row + [""] * (len(normalized_header) - len(row))
+            record = dict(zip(normalized_header, padded))
+            migrated_rows.append(
+                [self._value_from_record(record, column) for column in SHEET_COLUMNS]
+            )
+
+        self.service.spreadsheets().values().update(
             spreadsheetId=self.sheet_id,
-            body={"requests": [request]},
+            range=f"{self.sheet_name}!A2:{_LAST_COL}",
+            valueInputOption="RAW",
+            body={"values": migrated_rows},
         ).execute()
+        self._clear_values(f"{self.sheet_name}!V2:W")
+        logger.info(
+            "Migrated %d existing row(s) into the PROSPECTS schema.",
+            len(migrated_rows),
+        )
+
+    def _value_from_record(self, record: dict[str, Any], column: str) -> Any:
+        """Return the migrated value for a PROSPECTS column from an old row dict."""
+        if column == "Last Contact Date":
+            return record.get("Last Contact Date", "")
+        if column == "Last Outcome":
+            return record.get("Last Outcome", "")
+        return record.get(column, "")
 
     def _get_sheet_gid(self) -> int:
         """Return the internal numeric sheet ID (gid) for self.sheet_name.
@@ -278,6 +378,14 @@ class GoogleSheetsClient:
         ).execute()
         return result.get("values", [])
 
+    def _clear_values(self, sheet_range: str) -> None:
+        """Clear values from a range without deleting rows or columns."""
+        self.service.spreadsheets().values().clear(
+            spreadsheetId=self.sheet_id,
+            range=sheet_range,
+            body={},
+        ).execute()
+
 
 def prospect_to_sheet_row(prospect: dict[str, Any]) -> list[Any]:
     """Serialize a prospect dict into an ordered list of cell values.
@@ -299,19 +407,12 @@ def prospect_to_sheet_row(prospect: dict[str, Any]) -> list[Any]:
         prospect.get("source", ""),
         prospect.get("lead_score", ""),
         prospect.get("why_good_fit", ""),
-        prospect.get("status", "New"),
-        prospect.get("date_added", ""),
+        prospect.get("status") or "New",
+        prospect.get("last_contact_date", ""),
+        prospect.get("last_outcome", ""),
         prospect.get("notes", ""),
-        prospect.get("weighted_reputation_score", ""),
-        # --- Manually updated fields ---
-        # search_zip and search_radius are auto-populated from CLI args.
-        # date_contacted and follow_up_date are left empty on creation
-        # and filled in manually by the user in the Google Sheet
-        # after outreach occurs.
         prospect.get("search_zip", ""),
         prospect.get("search_radius", ""),
-        prospect.get("date_contacted", ""),
-        prospect.get("follow_up_date", ""),
         prospect.get("instagram_url", ""),
         prospect.get("email", ""),
     ]
