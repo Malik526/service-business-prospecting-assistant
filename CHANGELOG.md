@@ -2,6 +2,34 @@
 
 ---
 
+## [2026-06-10 19:49 EDT] — fix: add dynamic prospects schema mapping
+
+**Files Modified:** `google_sheets.py`, `backfill_emails.py`, `README.md`, `CHANGELOG.md`
+
+**Files Added:** `config/PROSPECTS_SCHEMA.json`, `tests/test_dynamic_schema.py`
+
+### Summary
+Added a dynamic PROSPECTS schema system that reads row 1 on every run, builds a
+header-to-index mapping, compares it to `config/PROSPECTS_SCHEMA.json`, and
+updates the cache when columns are rearranged, added, or removed.
+
+### Behavior
+- Refactored prospect row serialization to place values by header name instead
+  of fixed list positions.
+- Refactored append-time Place ID dedupe to read the live Place ID column.
+- Refactored dropdown validation to use mapped `Status` and `Last Outcome`
+  column indexes.
+- Refactored email backfill to use the same `SheetSchema` mapping and shared
+  column-letter conversion, including columns beyond `Z`.
+- Missing expected columns now log warnings and skip only the affected fields
+  or validations.
+
+### Verification
+- Added local `unittest` coverage for rearranged columns, deleted columns,
+  backfill queue mapping, default cache shape, and column letters beyond `Z`.
+
+---
+
 ## [2026-06-10 19:41 EDT] — fix: update prospect sheet append schema
 
 **Files Modified:** `google_sheets.py`, `main.py`, `config.py`, `README.md`

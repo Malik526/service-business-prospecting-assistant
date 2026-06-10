@@ -321,6 +321,18 @@ https://docs.google.com/spreadsheets/d/<GOOGLE_SHEET_ID>/edit
 
 The tool will create and maintain the header row automatically. Status and Last Outcome dropdown validation is applied on every run.
 
+### Dynamic PROSPECTS Schema
+
+On every run, the tool reads row 1 of the `PROSPECTS` tab and builds a live column map. Scraper appends, Place ID duplicate checks, dropdown validations, and email backfills all use that map instead of fixed column positions.
+
+The latest detected schema is cached at:
+
+```text
+config/PROSPECTS_SCHEMA.json
+```
+
+If columns are rearranged, added, or removed, the next run logs the schema change and updates the cache. Missing expected columns are handled gracefully: values for deleted columns are skipped, and dropdowns are only applied when their target columns exist.
+
 ---
 
 ## Usage

@@ -1,8 +1,8 @@
 """Google Sheets storage client.
 
 This module handles all interaction with the Google Sheets API:
-  - Ensuring the header row exists with the correct columns.
-  - Migrating older prospect headers into the current PROSPECTS schema.
+  - Reading row 1 and building a dynamic PROSPECTS column map.
+  - Caching the live schema in config/PROSPECTS_SCHEMA.json.
   - Applying dropdown validation to controlled outreach columns.
   - Reading existing records for deduplication.
   - Appending new prospect rows.
@@ -12,34 +12,18 @@ must be shared with the service account email as an Editor — without this,
 reads and writes will fail with a 403 permission error even if authentication
 itself succeeds.
 
-Column Layout (A–U)
--------------------
-A  Place ID
-B  Business Name
-C  Category
-D  Address
-E  Phone
-F  Website
-G  Google Maps URL
-H  Rating
-I  Review Count
-J  Distance From Search ZIP (mi)
-K  Source
-L  Lead Score
-M  Why Good Fit
-N  Status
-O  Last Contact Date        ← Manual outreach tracking
-P  Last Outcome             ← Manual outreach tracking
-Q  Notes
-R  Search ZIP Code          ← ZIP code used in the discovery run (auto-populated)
-S  Search Radius (mi)       ← Radius used in the discovery run (auto-populated)
-T  Instagram URL            ← Extracted from business website (auto-populated)
-U  Email                    ← Extracted from business website (auto-populated)
+The default PROSPECTS schema is still defined here, but runtime reads never
+assume the columns are in that order. If the user rearranges columns in the
+sheet, row serialization, duplicate checks, and dropdown validation follow the
+live header mapping.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -48,8 +32,13 @@ from googleapiclient.discovery import build
 
 logger = logging.getLogger(__name__)
 
+SCHEMA_VERSION = 1
+SCHEMA_CACHE_PATH = (
+    Path(__file__).resolve().parent / "config" / "PROSPECTS_SCHEMA.json"
+)
+
 # Ordered list of column headers. The order here defines the column layout in
-# the Google Sheet and must match `prospect_to_sheet_row` exactly.
+# a new empty Google Sheet. Existing sheets may be rearranged.
 SHEET_COLUMNS = [
     "Place ID",
     "Business Name",
@@ -73,15 +62,6 @@ SHEET_COLUMNS = [
     "Instagram URL",          # Column T — extracted from business website (auto-populated)
     "Email",                  # Column U — extracted from business website (auto-populated)
 ]
-
-# Column letter of the last column, derived from SHEET_COLUMNS length.
-# Update this if columns are added or removed.
-_LAST_COL = "U"  # 21 columns: A through U
-
-# Older releases wrote extra CRM/date/reputation columns through W. Read and
-# clear that full width during one-time schema normalization so old trailing
-# cells do not remain visible after the PROSPECTS header is written.
-_LEGACY_LAST_COL = "W"
 
 # Allowed values for the Status dropdown. Status now represents prospect
 # qualification only; call outcomes live in the Last Outcome column.
@@ -108,6 +88,40 @@ LAST_OUTCOME_OPTIONS = [
     "Do Not Call List",
 ]
 
+PROSPECT_FIELD_TO_COLUMN = {
+    "place_id": "Place ID",
+    "business_name": "Business Name",
+    "category": "Category",
+    "address": "Address",
+    "phone": "Phone",
+    "website": "Website",
+    "google_maps_url": "Google Maps URL",
+    "rating": "Rating",
+    "review_count": "Review Count",
+    "distance_miles": "Distance From Search ZIP (mi)",
+    "source": "Source",
+    "lead_score": "Lead Score",
+    "why_good_fit": "Why Good Fit",
+    "status": "Status",
+    "last_contact_date": "Last Contact Date",
+    "last_outcome": "Last Outcome",
+    "notes": "Notes",
+    "search_zip": "Search ZIP Code",
+    "search_radius": "Search Radius (mi)",
+    "instagram_url": "Instagram URL",
+    "email": "Email",
+}
+
+
+@dataclass(frozen=True)
+class SheetSchema:
+    """Live header metadata for the PROSPECTS sheet."""
+
+    schema_version: int
+    last_updated: str
+    headers: list[str]
+    columns: dict[str, int]
+
 
 class GoogleSheetsClient:
     def __init__(self, sheet_id: str, service_account_file: str, sheet_name: str) -> None:
@@ -126,50 +140,101 @@ class GoogleSheetsClient:
         self.sheet_id = sheet_id
         self.sheet_name = sheet_name
         self.service = build("sheets", "v4", credentials=credentials)
+        self._schema: SheetSchema | None = None
 
-    def ensure_header(self) -> None:
-        """Write the header row if it is missing or incorrect, then apply validation.
+    def ensure_header(self) -> SheetSchema:
+        """Ensure row 1 exists, verify the cached schema, and apply validation.
 
-        Reads the first row of the sheet and compares it against SHEET_COLUMNS.
-        If an older header is detected, existing rows are reshaped into the
-        current PROSPECTS schema so manual Status and Notes values stay in
-        their intended columns. Dropdown validation is applied on every call.
+        This method remains the public setup entrypoint for callers that used
+        the older fixed-column implementation. It now returns the live schema.
         """
-        values = self._get_values(f"{self.sheet_name}!A1:{_LEGACY_LAST_COL}1")
-        current_header = values[0] if values else []
+        schema = self.get_schema(force_refresh=True)
+        self.apply_dropdown_validations(schema=schema)
+        return schema
 
-        if current_header != SHEET_COLUMNS:
-            if current_header:
-                self._migrate_existing_rows(current_header)
+    def get_schema(self, force_refresh: bool = False) -> SheetSchema:
+        """Read row 1, compare it to the schema cache, and return live mapping."""
+        if self._schema is not None and not force_refresh:
+            return self._schema
+
+        cached_schema = self._load_schema_cache()
+        headers = self.read_header_row()
+
+        if not headers:
+            headers = SHEET_COLUMNS[:]
             self.service.spreadsheets().values().update(
                 spreadsheetId=self.sheet_id,
-                range=f"{self.sheet_name}!A1:{_LAST_COL}1",
+                range=(
+                    f"{self.sheet_name}!A1:"
+                    f"{column_index_to_letter(len(headers) - 1)}1"
+                ),
                 valueInputOption="RAW",
-                body={"values": [SHEET_COLUMNS]},
+                body={"values": [headers]},
             ).execute()
-            self._clear_values(f"{self.sheet_name}!V:W")
+            logger.info("Created default PROSPECTS header row.")
 
-        # Apply dropdown validation every run (idempotent).
-        self.apply_dropdown_validations()
+        schema = build_schema(headers)
+        missing_columns = [
+            column for column in SHEET_COLUMNS if column not in schema.columns
+        ]
+        if missing_columns:
+            logger.warning(
+                "PROSPECTS sheet is missing expected column(s): %s. "
+                "Operations for missing columns will be skipped.",
+                ", ".join(missing_columns),
+            )
+
+        if cached_schema is None:
+            logger.info("No PROSPECTS schema cache found; creating %s.", SCHEMA_CACHE_PATH)
+            self._save_schema_cache(schema)
+        elif cached_schema.columns != schema.columns:
+            logger.warning(
+                "PROSPECTS schema changed. Updating cache at %s.",
+                SCHEMA_CACHE_PATH,
+            )
+            self._save_schema_cache(schema)
+        else:
+            schema = cached_schema
+
+        self._schema = schema
+        return schema
+
+    def read_header_row(self) -> list[str]:
+        """Read row 1 from the live sheet and return trimmed header cells."""
+        values = self._get_values(f"{self.sheet_name}!1:1")
+        if not values:
+            return []
+        headers = [str(value).strip() for value in values[0]]
+        while headers and not headers[-1]:
+            headers.pop()
+        return headers
 
     def get_existing_records(self) -> list[dict[str, Any]]:
         """Read all existing data rows from the sheet and return as a list of dicts.
 
         Called at the start of each run to build the deduplication index.
-        Each row is padded to the full column width so that dicts always have
-        all expected keys, even if a row in the sheet is missing trailing cells.
+        Rows are keyed by the live header names, so column reordering does not
+        affect downstream record access.
 
         Returns:
-            List of dicts keyed by SHEET_COLUMNS values.
+            List of dicts keyed by current row-1 header values.
         """
-        self.ensure_header()
-        values = self._get_values(f"{self.sheet_name}!A2:{_LAST_COL}")
+        schema = self.ensure_header()
+        values = self.get_data_rows(schema)
         records = []
         for row in values:
-            # Pad short rows so every dict has the full set of column keys.
-            padded = row + [""] * (len(SHEET_COLUMNS) - len(row))
-            records.append(dict(zip(SHEET_COLUMNS, padded)))
+            # Pad short rows so every dict has the full set of live headers.
+            padded = row + [""] * (len(schema.headers) - len(row))
+            records.append(dict(zip(schema.headers, padded)))
         return records
+
+    def get_data_rows(self, schema: SheetSchema | None = None) -> list[list[Any]]:
+        """Read data rows through the last live header column."""
+        schema = schema or self.get_schema()
+        if not schema.headers:
+            return []
+        last_col = column_index_to_letter(len(schema.headers) - 1)
+        return self._get_values(f"{self.sheet_name}!A2:{last_col}")
 
     def get_record_by_place_id(self, place_id: str) -> dict | None:
         """Find and return a single row from the sheet matching the given Place ID.
@@ -203,11 +268,8 @@ class GoogleSheetsClient:
         if not prospects:
             return {"appended": 0, "skipped_duplicates": 0}
 
-        existing_place_ids = {
-            str(record.get("Place ID", "")).strip()
-            for record in self.get_existing_records()
-            if str(record.get("Place ID", "")).strip()
-        }
+        schema = self.ensure_header()
+        existing_place_ids = self.get_existing_place_ids(schema)
 
         appendable = []
         skipped_duplicates = 0
@@ -227,16 +289,17 @@ class GoogleSheetsClient:
             )
             return {"appended": 0, "skipped_duplicates": skipped_duplicates}
 
-        rows = [prospect_to_sheet_row(prospect) for prospect in appendable]
+        rows = [prospect_to_sheet_row(prospect, schema) for prospect in appendable]
+        last_col = column_index_to_letter(len(schema.headers) - 1)
         self.service.spreadsheets().values().append(
             spreadsheetId=self.sheet_id,
-            range=f"{self.sheet_name}!A:{_LAST_COL}",
+            range=f"{self.sheet_name}!A:{last_col}",
             valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
             body={"values": rows},
         ).execute()
 
-        self.apply_dropdown_validations()
+        self.apply_dropdown_validations(schema=schema)
         logger.info(
             "Appended %d prospect(s). Skipped %d duplicate Place ID(s).",
             len(appendable),
@@ -244,7 +307,23 @@ class GoogleSheetsClient:
         )
         return {"appended": len(appendable), "skipped_duplicates": skipped_duplicates}
 
-    def apply_dropdown_validations(self) -> None:
+    def get_existing_place_ids(self, schema: SheetSchema | None = None) -> set[str]:
+        """Return existing Place IDs using the live Place ID column mapping."""
+        schema = schema or self.get_schema()
+        place_id_index = schema.columns.get("Place ID")
+        if place_id_index is None:
+            logger.warning("Cannot dedupe by Place ID because the column is missing.")
+            return set()
+
+        col_letter = column_index_to_letter(place_id_index)
+        rows = self._get_values(f"{self.sheet_name}!{col_letter}2:{col_letter}")
+        return {
+            str(row[0]).strip()
+            for row in rows
+            if row and str(row[0]).strip()
+        }
+
+    def apply_dropdown_validations(self, schema: SheetSchema | None = None) -> None:
         """Apply dropdown validation rules to controlled PROSPECTS columns.
 
         Uses the Sheets batchUpdate API with a `setDataValidation` request.
@@ -257,19 +336,25 @@ class GoogleSheetsClient:
         `strict=False` keeps the dropdown suggestions visible while allowing
         manual values that are not in the configured list.
         """
+        schema = schema or self.get_schema()
         sheet_gid = self._get_sheet_gid()
-        requests = [
-            self._validation_request(
+        requests = []
+        for column_name, options in {
+            "Status": STATUS_OPTIONS,
+            "Last Outcome": LAST_OUTCOME_OPTIONS,
+        }.items():
+            request = self._validation_request(
                 sheet_gid=sheet_gid,
-                column_name="Status",
-                options=STATUS_OPTIONS,
-            ),
-            self._validation_request(
-                sheet_gid=sheet_gid,
-                column_name="Last Outcome",
-                options=LAST_OUTCOME_OPTIONS,
-            ),
-        ]
+                column_name=column_name,
+                options=options,
+                schema=schema,
+            )
+            if request is not None:
+                requests.append(request)
+
+        if not requests:
+            logger.warning("No dropdown validations applied; controlled columns are missing.")
+            return
 
         self.service.spreadsheets().batchUpdate(
             spreadsheetId=self.sheet_id,
@@ -281,9 +366,16 @@ class GoogleSheetsClient:
         sheet_gid: int,
         column_name: str,
         options: list[str],
-    ) -> dict[str, Any]:
+        schema: SheetSchema,
+    ) -> dict[str, Any] | None:
         """Build one Google Sheets data-validation request for a dropdown column."""
-        column_index = SHEET_COLUMNS.index(column_name)
+        column_index = schema.columns.get(column_name)
+        if column_index is None:
+            logger.warning(
+                "Skipping dropdown validation; '%s' column is missing.",
+                column_name,
+            )
+            return None
         return {
             "setDataValidation": {
                 "range": {
@@ -303,50 +395,6 @@ class GoogleSheetsClient:
                 },
             }
         }
-
-    def _migrate_existing_rows(self, current_header: list[Any]) -> None:
-        """Reshape old sheet rows into the current PROSPECTS column order."""
-        normalized_header = [str(header).strip() for header in current_header]
-        legacy_markers = [
-            "Date Added",
-            "Weighted Reputation Score",
-            "Date Contacted",
-            "Follow-Up Date",
-        ]
-        if not any(header in normalized_header for header in legacy_markers):
-            return
-
-        old_rows = self._get_values(f"{self.sheet_name}!A2:{_LEGACY_LAST_COL}")
-        if not old_rows:
-            return
-
-        migrated_rows = []
-        for row in old_rows:
-            padded = row + [""] * (len(normalized_header) - len(row))
-            record = dict(zip(normalized_header, padded))
-            migrated_rows.append(
-                [self._value_from_record(record, column) for column in SHEET_COLUMNS]
-            )
-
-        self.service.spreadsheets().values().update(
-            spreadsheetId=self.sheet_id,
-            range=f"{self.sheet_name}!A2:{_LAST_COL}",
-            valueInputOption="RAW",
-            body={"values": migrated_rows},
-        ).execute()
-        self._clear_values(f"{self.sheet_name}!V2:W")
-        logger.info(
-            "Migrated %d existing row(s) into the PROSPECTS schema.",
-            len(migrated_rows),
-        )
-
-    def _value_from_record(self, record: dict[str, Any], column: str) -> Any:
-        """Return the migrated value for a PROSPECTS column from an old row dict."""
-        if column == "Last Contact Date":
-            return record.get("Last Contact Date", "")
-        if column == "Last Outcome":
-            return record.get("Last Outcome", "")
-        return record.get(column, "")
 
     def _get_sheet_gid(self) -> int:
         """Return the internal numeric sheet ID (gid) for self.sheet_name.
@@ -386,33 +434,112 @@ class GoogleSheetsClient:
             body={},
         ).execute()
 
+    def _load_schema_cache(self) -> SheetSchema | None:
+        """Load the cached PROSPECTS schema from disk if it exists and is valid."""
+        if not SCHEMA_CACHE_PATH.exists():
+            return None
+        try:
+            with open(SCHEMA_CACHE_PATH, encoding="utf-8") as schema_file:
+                data = json.load(schema_file)
+        except Exception as exc:
+            logger.warning("Could not read schema cache: %s", exc)
+            return None
 
-def prospect_to_sheet_row(prospect: dict[str, Any]) -> list[Any]:
+        try:
+            columns = {
+                str(column): int(index)
+                for column, index in data.get("columns", {}).items()
+            }
+            headers = data.get("headers") or headers_from_mapping(columns)
+            return SheetSchema(
+                schema_version=int(data.get("schema_version", SCHEMA_VERSION)),
+                last_updated=str(data.get("last_updated", "")),
+                headers=[str(header) for header in headers],
+                columns=columns,
+            )
+        except Exception as exc:
+            logger.warning("Schema cache is invalid and will be rebuilt: %s", exc)
+            return None
+
+    def _save_schema_cache(self, schema: SheetSchema) -> None:
+        """Persist the live schema cache to config/PROSPECTS_SCHEMA.json."""
+        SCHEMA_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema_version": schema.schema_version,
+            "last_updated": datetime.now(timezone.utc).date().isoformat(),
+            "columns": schema.columns,
+            "headers": schema.headers,
+        }
+        with open(SCHEMA_CACHE_PATH, "w", encoding="utf-8") as schema_file:
+            json.dump(payload, schema_file, indent=2)
+            schema_file.write("\n")
+
+
+def build_schema(headers: list[str]) -> SheetSchema:
+    """Build a SheetSchema from row-1 headers, preserving live indexes."""
+    columns: dict[str, int] = {}
+    duplicates = []
+    for index, header in enumerate(headers):
+        if not header:
+            continue
+        if header in columns:
+            duplicates.append(header)
+            continue
+        columns[header] = index
+
+    if duplicates:
+        logger.warning(
+            "Duplicate header(s) found in PROSPECTS sheet and ignored after first use: %s.",
+            ", ".join(sorted(set(duplicates))),
+        )
+
+    return SheetSchema(
+        schema_version=SCHEMA_VERSION,
+        last_updated=datetime.now(timezone.utc).date().isoformat(),
+        headers=headers,
+        columns=columns,
+    )
+
+
+def headers_from_mapping(columns: dict[str, int]) -> list[str]:
+    """Rebuild a sparse header list from a cached column mapping."""
+    if not columns:
+        return []
+    headers = [""] * (max(columns.values()) + 1)
+    for header, index in columns.items():
+        headers[index] = header
+    return headers
+
+
+def column_index_to_letter(index: int) -> str:
+    """Convert a zero-based column index to a Google Sheets column letter."""
+    if index < 0:
+        raise ValueError("Column index must be non-negative.")
+    letters = ""
+    index += 1
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
+
+
+def prospect_to_sheet_row(
+    prospect: dict[str, Any],
+    schema: SheetSchema | None = None,
+) -> list[Any]:
     """Serialize a prospect dict into an ordered list of cell values.
 
-    The order must exactly match SHEET_COLUMNS. Missing keys default to
-    empty string so partial prospects don't shift column alignment.
+    Values are placed by live header mapping when a schema is provided. Missing
+    sheet columns are skipped so deleted columns fail gracefully.
     """
-    return [
-        prospect.get("place_id", ""),
-        prospect.get("business_name", ""),
-        prospect.get("category", ""),
-        prospect.get("address", ""),
-        prospect.get("phone", ""),
-        prospect.get("website", ""),
-        prospect.get("google_maps_url", ""),
-        prospect.get("rating", ""),
-        prospect.get("review_count", ""),
-        prospect.get("distance_miles", ""),
-        prospect.get("source", ""),
-        prospect.get("lead_score", ""),
-        prospect.get("why_good_fit", ""),
-        prospect.get("status") or "New",
-        prospect.get("last_contact_date", ""),
-        prospect.get("last_outcome", ""),
-        prospect.get("notes", ""),
-        prospect.get("search_zip", ""),
-        prospect.get("search_radius", ""),
-        prospect.get("instagram_url", ""),
-        prospect.get("email", ""),
-    ]
+    schema = schema or build_schema(SHEET_COLUMNS)
+    row = [""] * len(schema.headers)
+    for field_name, column_name in PROSPECT_FIELD_TO_COLUMN.items():
+        column_index = schema.columns.get(column_name)
+        if column_index is None:
+            continue
+        value = prospect.get(field_name, "")
+        if field_name == "status":
+            value = value or "New"
+        row[column_index] = value
+    return row

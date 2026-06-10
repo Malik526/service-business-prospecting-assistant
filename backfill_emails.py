@@ -22,7 +22,6 @@ import argparse
 import json
 import os
 import socket
-import string
 import sys
 import time
 from concurrent.futures import (
@@ -37,7 +36,7 @@ from typing import Any
 from googleapiclient.errors import HttpError
 
 from config import Config, load_config
-from google_sheets import GoogleSheetsClient
+from google_sheets import GoogleSheetsClient, SheetSchema, column_index_to_letter
 from pipeline.social import extract_email
 
 # Socket-level safety net — catches hangs that requests timeout alone misses.
@@ -126,16 +125,14 @@ def read_all_rows(
     sheets_client: GoogleSheetsClient,
     sheet_id: str,
     sheet_name: str,
-) -> tuple[list[str], list[list[str]]]:
-    """Read the header row and all data rows from the sheet.
+) -> tuple[SheetSchema, list[list[str]]]:
+    """Read and verify the dynamic schema plus all data rows from the sheet.
 
-    Returns (headers, data_rows). Exits the process on any read failure.
+    Returns (schema, data_rows). Exits the process on any read failure.
     """
     try:
-        result = sheets_client.service.spreadsheets().values().get(
-            spreadsheetId=sheet_id,
-            range=f"{sheet_name}!A:Z",
-        ).execute()
+        schema = sheets_client.ensure_header()
+        data_rows = sheets_client.get_data_rows(schema)
     except HttpError as exc:
         print(f"ERROR: Could not read sheet — {exc}")
         sys.exit(1)
@@ -143,30 +140,29 @@ def read_all_rows(
         print(f"ERROR: Unexpected failure reading sheet — {exc}")
         sys.exit(1)
 
-    rows = result.get("values", [])
-    if not rows:
+    if not schema.headers:
         print("Sheet appears empty — nothing to backfill.")
         sys.exit(0)
 
-    return rows[0], rows[1:]
+    return schema, data_rows
 
 
-def find_column_indices(headers: list[str]) -> tuple[int, int]:
-    """Return (website_col_index, email_col_index) from the live header row.
+def find_column_indices(schema: SheetSchema) -> tuple[int, int]:
+    """Return (website_col_index, email_col_index) from the live schema.
 
     Dynamic lookup so the script survives column reorders. Exits if missing.
     """
-    missing = [col for col in ("Website", "Email") if col not in headers]
+    missing = [col for col in ("Website", "Email") if col not in schema.columns]
     if missing:
         print(f"ERROR: Required column(s) not found: {missing}")
-        print(f"       Headers present: {headers}")
+        print(f"       Headers present: {schema.headers}")
         sys.exit(1)
-    return headers.index("Website"), headers.index("Email")
+    return schema.columns["Website"], schema.columns["Email"]
 
 
 def build_enrichment_queue(
     data_rows: list[list[str]],
-    headers: list[str],
+    schema: SheetSchema,
     website_col: int,
     email_col: int,
 ) -> list[dict[str, Any]]:
@@ -176,22 +172,24 @@ def build_enrichment_queue(
     first data row = row 2). Short rows are padded before index access.
     """
     queue = []
-    business_col = (
-        headers.index("Business Name")
-        if "Business Name" in headers
-        else None
-    )
+    business_col = schema.columns.get("Business Name")
     for i, row in enumerate(data_rows):
-        padded = row + [""] * (len(headers) - len(row))
+        padded = row + [""] * (len(schema.headers) - len(row))
         website = padded[website_col].strip()
         email = padded[email_col].strip()
         if website and not email:
-            business_name = padded[business_col].strip() if business_col is not None else ""
-            queue.append({
-                "row_index": i + 2,
-                "business_name": business_name,
-                "website": website,
-            })
+            business_name = (
+                padded[business_col].strip()
+                if business_col is not None
+                else ""
+            )
+            queue.append(
+                {
+                    "row_index": i + 2,
+                    "business_name": business_name,
+                    "website": website,
+                }
+            )
     return queue
 
 
@@ -297,7 +295,7 @@ def write_batch_results(
     Returns the number of emails successfully written.
     Only non-empty emails are included in the write payload.
     """
-    col_letter = string.ascii_uppercase[email_col]
+    col_letter = column_index_to_letter(email_col)
     batch_data = [
         {"range": f"{config.sheet_name}!{col_letter}{row_index}", "values": [[email]]}
         for row_index, email in results.items()
@@ -326,7 +324,10 @@ def write_batch_results(
             print("  Retrying...")
             time.sleep(2)
 
-    print(f"  ERROR: Write failed after {_WRITE_RETRIES + 1} attempts — {len(batch_data)} email(s) not saved.")
+    print(
+        f"  ERROR: Write failed after {_WRITE_RETRIES + 1} attempts — "
+        f"{len(batch_data)} email(s) not saved."
+    )
     return 0
 
 
@@ -370,22 +371,29 @@ def print_summary(
 # --- Orchestration ---
 
 def main() -> None:
-    """Orchestrate the full backfill: read → filter → batch extract → write → checkpoint."""
+    """Orchestrate the full backfill from read to checkpoint."""
     args = parse_args()
     config = load_config()
 
     # --- Read sheet ---
     print("Reading sheet...")
     sheets_client = _make_sheets_client(config)
-    headers, data_rows = read_all_rows(sheets_client, config.google_sheet_id, config.sheet_name)
+    schema, data_rows = read_all_rows(
+        sheets_client,
+        config.google_sheet_id,
+        config.sheet_name,
+    )
     print(f"Read {len(data_rows)} data rows.")
 
     # --- Locate columns ---
-    website_col, email_col = find_column_indices(headers)
+    website_col, email_col = find_column_indices(schema)
 
     # --- Build full enrichment queue ---
-    full_queue = build_enrichment_queue(data_rows, headers, website_col, email_col)
-    print(f"Found {len(full_queue)} prospects needing enrichment (website present, email empty).")
+    full_queue = build_enrichment_queue(data_rows, schema, website_col, email_col)
+    print(
+        f"Found {len(full_queue)} prospects needing enrichment "
+        "(website present, email empty)."
+    )
     print(f"Skipping {len(data_rows) - len(full_queue)} (already have email or no website).")
 
     if not full_queue:
@@ -431,7 +439,7 @@ def main() -> None:
 
         # --- Write or dry-run ---
         if args.dry_run:
-            col_letter = string.ascii_uppercase[email_col]
+            col_letter = column_index_to_letter(email_col)
             for row_index, email in batch_results.items():
                 if email:
                     cell = f"{config.sheet_name}!{col_letter}{row_index}"
