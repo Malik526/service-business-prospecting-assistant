@@ -14,6 +14,7 @@ Dependencies:
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,37 @@ MODEL = "claude-sonnet-4-20250514"
 
 # Briefs are written relative to the current working directory (the script root).
 BRIEFS_DIR = Path("briefs")
+
+# Strip emoji characters before brief JSON can be reused as website content.
+EMOJI_RE = re.compile(
+    "["
+    "\U0001F1E6-\U0001F1FF"  # regional indicators
+    "\U0001F300-\U0001F5FF"  # symbols and pictographs
+    "\U0001F600-\U0001F64F"  # emoticons
+    "\U0001F680-\U0001F6FF"  # transport and map
+    "\U0001F700-\U0001F77F"
+    "\U0001F780-\U0001F7FF"
+    "\U0001F800-\U0001F8FF"
+    "\U0001F900-\U0001F9FF"
+    "\U0001FA00-\U0001FA6F"
+    "\U0001FA70-\U0001FAFF"
+    "\u2600-\u26FF"          # miscellaneous symbols
+    "\u2700-\u27BF"          # dingbats
+    "\uFE0F"                 # emoji variation selector
+    "]+",
+    flags=re.UNICODE,
+)
+
+
+def sanitize_website_content(value: Any) -> Any:
+    """Recursively remove emoji characters from generated website content."""
+    if isinstance(value, str):
+        return EMOJI_RE.sub("", value).strip()
+    if isinstance(value, list):
+        return [sanitize_website_content(item) for item in value]
+    if isinstance(value, dict):
+        return {key: sanitize_website_content(item) for key, item in value.items()}
+    return value
 
 
 def build_brief(
@@ -49,7 +81,7 @@ def build_brief(
     """
     return {
         "business_info": prospect,
-        "brand_brief": brand_brief,
+        "brand_brief": sanitize_website_content(brand_brief),
         "pipeline_meta": {
             "place_id": prospect.get("Place ID", ""),
             "generated_at": datetime.now(timezone.utc).isoformat(),

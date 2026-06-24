@@ -34,7 +34,10 @@ SYSTEM_PROMPT = (
     "prospect's data from Google Maps, produce a structured brand brief "
     "that will be used to build their website, write their cold call "
     "script, and optimize their SEO. Be specific, practical, and "
-    "grounded in the data provided."
+    "grounded in the data provided. All copy must be clean plain text "
+    "that can be dropped directly into a website content file. Never use "
+    "emojis, decorative emoji bullets, emoji arrows, phone-style emoji "
+    "symbols, or star emoji ratings."
 )
 
 # The exact keys expected in Claude's JSON response.
@@ -118,6 +121,14 @@ Return ONLY a valid JSON object with exactly these keys:
   "website_sections": ["list of recommended website page sections"],
   "owner_note": "string — personal note about what makes this business worth working with"
 }}
+
+Website content rules:
+- Do not use emojis anywhere in any string value.
+- Do not use decorative emoji bullets, phone emojis, check emojis, star emojis, or emoji arrows.
+- Use plain text ratings such as "5.0 / 5.0" or "124 reviews" instead of star emojis.
+- Keep headlines, subheadlines, cold_call_hook, review_themes, and owner_note plain text only.
+- Do not suggest symmetrical icon card grids for services or features.
+- Prefer service lists, stacked rows, full-width sections, editorial typography, and concise plain-language copy.
 
 Do not include any explanation, markdown, or extra text. Return only the JSON object."""
 
