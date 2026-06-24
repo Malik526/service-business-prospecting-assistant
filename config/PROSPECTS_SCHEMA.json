@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-06-10",
+  "last_updated": "2026-06-24",
   "columns": {
     "Place ID": 0,
     "Business Name": 1,
@@ -22,7 +22,11 @@
     "Search ZIP Code": 17,
     "Search Radius (mi)": 18,
     "Instagram URL": 19,
-    "Email": 20
+    "Email": 20,
+    "Street": 21,
+    "City": 22,
+    "State": 23,
+    "ZIP": 24
   },
   "headers": [
     "Place ID",
@@ -45,6 +49,10 @@
     "Search ZIP Code",
     "Search Radius (mi)",
     "Instagram URL",
-    "Email"
+    "Email",
+    "Street",
+    "City",
+    "State",
+    "ZIP"
   ]
 }

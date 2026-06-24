@@ -10,12 +10,14 @@ import unittest
 
 from backfill_emails import build_enrichment_queue
 from google_sheets import (
+    ADDRESS_COMPONENT_COLUMNS,
     GoogleSheetsClient,
     SHEET_COLUMNS,
     build_schema,
     column_index_to_letter,
     prospect_to_sheet_row,
 )
+from pipeline.address import parse_address
 
 
 class DynamicSchemaTests(unittest.TestCase):
@@ -104,6 +106,91 @@ class DynamicSchemaTests(unittest.TestCase):
         self.assertEqual(len(schema.headers), len(schema.columns))
         self.assertEqual(schema.columns["Place ID"], 0)
         self.assertEqual(schema.columns["Email"], 20)
+        self.assertEqual(schema.columns["Street"], 21)
+        self.assertEqual(schema.columns["City"], 22)
+        self.assertEqual(schema.columns["State"], 23)
+        self.assertEqual(schema.columns["ZIP"], 24)
+
+    def test_prospect_row_includes_parsed_address_fields(self) -> None:
+        """Serialize parsed address components into the default schema."""
+        schema = build_schema(SHEET_COLUMNS)
+        row = prospect_to_sheet_row(
+            {
+                "business_name": "Ridge Electric",
+                "street": "6079 Myrtle Ave",
+                "city": "Ridgewood",
+                "state": "NY",
+                "zip": "11385",
+            },
+            schema,
+        )
+
+        self.assertEqual(row[schema.columns["Street"]], "6079 Myrtle Ave")
+        self.assertEqual(row[schema.columns["City"]], "Ridgewood")
+        self.assertEqual(row[schema.columns["State"]], "NY")
+        self.assertEqual(row[schema.columns["ZIP"]], "11385")
+
+    def test_parse_address_extracts_google_places_components(self) -> None:
+        """Parse the standard Google Places address format into components."""
+        self.assertEqual(
+            parse_address("6079 Myrtle Ave, Ridgewood, NY 11385, USA"),
+            {
+                "street": "6079 Myrtle Ave",
+                "city": "Ridgewood",
+                "state": "NY",
+                "zip": "11385",
+            },
+        )
+
+    def test_parse_address_returns_empty_parts_on_failure(self) -> None:
+        """Return empty address parts instead of raising on invalid input."""
+        with self.assertLogs("pipeline.address", level="WARNING") as captured_logs:
+            result = parse_address("Ridgewood, NY")
+
+        self.assertEqual(result, {"street": "", "city": "", "state": "", "zip": ""})
+        self.assertIn("Could not parse address 'Ridgewood, NY'", captured_logs.output[0])
+
+    def test_address_headers_are_appended_to_existing_sheets(self) -> None:
+        """Append parsed address headers without changing existing header order."""
+        client = object.__new__(GoogleSheetsClient)
+        client.sheet_name = "PROSPECTS"
+        update_calls = []
+
+        class FakeValues:
+            """Minimal fake Sheets values service for header update assertions."""
+
+            def update(self, **kwargs: object) -> "FakeValues":
+                """Record the update call and return an executable object."""
+                update_calls.append(kwargs)
+                return self
+
+            def execute(self) -> dict[str, object]:
+                """Return a fake successful Sheets API response."""
+                return {}
+
+        class FakeSpreadsheets:
+            """Minimal fake Sheets spreadsheets service for tests."""
+
+            def values(self) -> FakeValues:
+                """Return fake values operations."""
+                return FakeValues()
+
+        class FakeService:
+            """Minimal fake Sheets service for tests."""
+
+            def spreadsheets(self) -> FakeSpreadsheets:
+                """Return fake spreadsheet operations."""
+                return FakeSpreadsheets()
+
+        client.sheet_id = "sheet-123"
+        client.service = FakeService()
+        headers = ["Place ID", "Business Name", "Email"]
+
+        updated_headers = client._ensure_address_component_headers(headers)
+
+        self.assertEqual(updated_headers, headers + ADDRESS_COMPONENT_COLUMNS)
+        self.assertEqual(update_calls[0]["range"], "PROSPECTS!D1:G1")
+        self.assertEqual(update_calls[0]["body"], {"values": [ADDRESS_COMPONENT_COLUMNS]})
 
     def test_existing_place_ids_use_mapped_column(self) -> None:
         """Read Place IDs from the live mapped column rather than column A."""

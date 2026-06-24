@@ -34,6 +34,7 @@ from config import load_config, validate_config
 from dedupe import add_to_index, build_dedupe_index, is_duplicate
 from google_places import GooglePlacesClient
 from google_sheets import GoogleSheetsClient
+from pipeline.address import parse_address
 from scoring import score_prospect, weighted_reputation_score, why_good_fit
 from utils import safe_float, safe_int
 
@@ -259,6 +260,13 @@ def main() -> None:
         # Allows filtering and grouping by ZIP code and radius in the sheet.
         prospect["search_zip"] = args.zip_code
         prospect["search_radius"] = args.radius
+
+        # Split the full Google Places address into filterable sheet columns.
+        parsed_address = parse_address(prospect.get("address", ""))
+        prospect["street"] = parsed_address.get("street", "")
+        prospect["city"] = parsed_address.get("city", "")
+        prospect["state"] = parsed_address.get("state", "")
+        prospect["zip"] = parsed_address.get("zip", "")
 
         enriched = enrich_with_score(prospect, category_lookup)
 

@@ -61,7 +61,13 @@ SHEET_COLUMNS = [
     "Search Radius (mi)",     # Column S — radius used in the discovery run
     "Instagram URL",          # Column T — extracted from business website (auto-populated)
     "Email",                  # Column U — extracted from business website (auto-populated)
+    "Street",                 # Column V — parsed street address from Address
+    "City",                   # Column W — parsed city from Address
+    "State",                  # Column X — parsed state from Address
+    "ZIP",                    # Column Y — parsed ZIP code from Address
 ]
+
+ADDRESS_COMPONENT_COLUMNS = ["Street", "City", "State", "ZIP"]
 
 # Allowed values for the Status dropdown. Status now represents prospect
 # qualification only; call outcomes live in the Last Outcome column.
@@ -110,6 +116,10 @@ PROSPECT_FIELD_TO_COLUMN = {
     "search_radius": "Search Radius (mi)",
     "instagram_url": "Instagram URL",
     "email": "Email",
+    "street": "Street",
+    "city": "City",
+    "state": "State",
+    "zip": "ZIP",
 }
 
 
@@ -173,6 +183,7 @@ class GoogleSheetsClient:
             ).execute()
             logger.info("Created default PROSPECTS header row.")
 
+        headers = self._ensure_address_component_headers(headers)
         schema = build_schema(headers)
         missing_columns = [
             column for column in SHEET_COLUMNS if column not in schema.columns
@@ -208,6 +219,30 @@ class GoogleSheetsClient:
         while headers and not headers[-1]:
             headers.pop()
         return headers
+
+    def _ensure_address_component_headers(self, headers: list[str]) -> list[str]:
+        """Append required parsed address headers when an existing sheet lacks them."""
+        missing_headers = [
+            header for header in ADDRESS_COMPONENT_COLUMNS if header not in headers
+        ]
+        if not missing_headers:
+            return headers
+
+        start_index = len(headers)
+        updated_headers = headers + missing_headers
+        start_col = column_index_to_letter(start_index)
+        end_col = column_index_to_letter(len(updated_headers) - 1)
+        self.service.spreadsheets().values().update(
+            spreadsheetId=self.sheet_id,
+            range=f"{self.sheet_name}!{start_col}1:{end_col}1",
+            valueInputOption="RAW",
+            body={"values": [missing_headers]},
+        ).execute()
+        logger.info(
+            "Added parsed address header column(s): %s.",
+            ", ".join(missing_headers),
+        )
+        return updated_headers
 
     def get_existing_records(self) -> list[dict[str, Any]]:
         """Read all existing data rows from the sheet and return as a list of dicts.

@@ -2,6 +2,36 @@
 
 ---
 
+## [2026-06-23 23:06 EDT] — feat: add parsed address columns to prospecting pipeline
+
+**Files Modified:** `google_sheets.py`, `main.py`, `pipeline/__init__.py`, `README.md`, `tests/test_dynamic_schema.py`, `CHANGELOG.md`
+
+**Files Added:** `pipeline/address.py`
+
+### Summary
+Added address component parsing so new prospects now populate separate `Street`,
+`City`, `State`, and `ZIP` fields in addition to the original full `Address`.
+
+### Behavior
+- Added `pipeline/address.py` with `parse_address()` for Google Places formatted
+  addresses such as `6079 Myrtle Ave, Ridgewood, NY 11385, USA`.
+- Added the parsed address columns after `Email` in the canonical PROSPECTS
+  schema and row serialization map.
+- Added a narrow existing-sheet migration that appends missing parsed address
+  headers without reordering existing columns.
+- Updated `main.py` to parse each accepted new prospect before append.
+- Parse failures log a warning and return empty component fields without
+  interrupting the run.
+
+### Verification
+- `python3 -m unittest tests/test_dynamic_schema.py`
+- `python3 -m py_compile main.py google_sheets.py pipeline/address.py`
+- `python3 main.py --zip 11385 --radius 5` completed successfully, found 360
+  businesses, skipped 324 duplicates, and appended 36 new prospects.
+- The live sheet reported existing schema drift: `Last Contact Date` is missing.
+
+---
+
 ## [2026-06-10 19:49 EDT] — fix: add dynamic prospects schema mapping
 
 **Files Modified:** `google_sheets.py`, `backfill_emails.py`, `README.md`, `CHANGELOG.md`
