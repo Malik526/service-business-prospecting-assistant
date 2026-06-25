@@ -23,7 +23,7 @@ from typing import Any
 LOGGER = logging.getLogger(__name__)
 PROJECT_DIR = Path(__file__).resolve().parent
 DEFAULT_CONFIG_FILE = "scrape_config.json"
-DEFAULT_RADIUS = 20
+DEFAULT_RADIUS = 30
 DEFAULT_CATEGORIES = "electrician,hvac,plumber"
 LAUNCH_DELAY_SECONDS = 1
 REPORT_CATEGORIES = ("electrician", "hvac", "plumber")

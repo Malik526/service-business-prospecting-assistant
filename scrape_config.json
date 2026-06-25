@@ -1,11 +1,14 @@
 {
-  "default_radius": 20,
+  "default_radius": 30,
   "default_categories": "electrician,hvac,plumber",
   "zip_codes": [
-    "08002",
-    "10001",
-    "11375",
-    "07032",
-    "19102"
+    "20016",
+    "21201",
+    "19107",
+    "15220",
+    "23219",
+    "23606",
+    "23704",
+    "13210"    
   ]
 }
