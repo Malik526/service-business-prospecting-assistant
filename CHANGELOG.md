@@ -2,6 +2,32 @@
 
 ---
 
+## [2026-06-25 16:09 EDT] — feat: add contact backfill toggles and Instagram extraction
+
+**Files Modified:** `backfill_emails.py`, `pipeline/social.py`, `README.md`, `tests/test_dynamic_schema.py`, `CHANGELOG.md`
+
+### Summary
+Expanded the existing backfill script from email-only enrichment to configurable
+contact enrichment for both `Email` and `Instagram URL`.
+
+### Behavior
+- Added `--skip-email` and `--skip-instagram` flags.
+- Default backfill now attempts both missing emails and missing Instagram URLs.
+- Queue building checks the live `Email` and `Instagram URL` columns and only
+  targets empty cells for the selected fields.
+- Writes remain non-destructive: populated cells are skipped and never
+  overwritten.
+- Checkpointing is now target-specific, so an email attempt does not cause a
+  later Instagram-only resume to skip that row.
+- Improved website extraction robustness for bare domains, common contact/about
+  pages, HTML entity decoding, and obvious asset-file false positives.
+
+### Verification
+- `python3 -m unittest tests/test_dynamic_schema.py`
+- `python3 -m py_compile backfill_emails.py pipeline/social.py tests/test_dynamic_schema.py`
+
+---
+
 ## [2026-06-25 15:53 EDT] — feat: add category-filtered prospect scraping
 
 **Files Modified:** `main.py`, `categories.py`, `README.md`, `tests/test_dynamic_schema.py`, `CHANGELOG.md`

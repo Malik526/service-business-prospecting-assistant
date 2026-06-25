@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import unittest
 
-from backfill_emails import build_enrichment_queue
+from backfill_emails import apply_checkpoint_filter, build_enrichment_queue
 from categories import filter_target_categories
 from google_sheets import (
     ADDRESS_COMPONENT_COLUMNS,
@@ -93,19 +93,25 @@ class DynamicSchemaTests(unittest.TestCase):
         self.assertEqual(row, ["Maple HVAC", "office@example.com"])
 
     def test_build_enrichment_queue_uses_schema_mapping(self) -> None:
-        """Find Website and Email values even when columns are rearranged."""
-        schema = build_schema(["Email", "Business Name", "Website"])
+        """Find Website, Email, and Instagram values when columns are rearranged."""
+        schema = build_schema(["Email", "Business Name", "Instagram URL", "Website"])
         rows = [
-            ["", "Ready Plumbing", "https://ready.example"],
-            ["team@example.com", "Done HVAC", "https://done.example"],
-            ["", "No Site Electric", ""],
+            ["", "Ready Plumbing", "", "https://ready.example"],
+            ["team@example.com", "Needs Social HVAC", "", "https://social.example"],
+            ["", "Needs Email Electric", "https://instagram.com/electric", "https://electric.example"],
+            ["team@example.com", "Done HVAC", "https://instagram.com/done", "https://done.example"],
+            ["", "No Site Electric", "", ""],
         ]
 
         queue = build_enrichment_queue(
             rows,
             schema,
             schema.columns["Website"],
-            schema.columns["Email"],
+            {
+                "email": schema.columns["Email"],
+                "instagram_url": schema.columns["Instagram URL"],
+            },
+            ["email", "instagram_url"],
         )
 
         self.assertEqual(
@@ -115,6 +121,81 @@ class DynamicSchemaTests(unittest.TestCase):
                     "row_index": 2,
                     "business_name": "Ready Plumbing",
                     "website": "https://ready.example",
+                    "targets": ["email", "instagram_url"],
+                },
+                {
+                    "row_index": 3,
+                    "business_name": "Needs Social HVAC",
+                    "website": "https://social.example",
+                    "targets": ["instagram_url"],
+                },
+                {
+                    "row_index": 4,
+                    "business_name": "Needs Email Electric",
+                    "website": "https://electric.example",
+                    "targets": ["email"],
+                }
+            ],
+        )
+
+    def test_build_enrichment_queue_respects_skip_email_target(self) -> None:
+        """Queue only Instagram rows when email extraction is skipped."""
+        schema = build_schema(["Email", "Instagram URL", "Website"])
+        rows = [
+            ["", "", "https://both.example"],
+            ["", "https://instagram.com/done", "https://email-only.example"],
+        ]
+
+        queue = build_enrichment_queue(
+            rows,
+            schema,
+            schema.columns["Website"],
+            {"instagram_url": schema.columns["Instagram URL"]},
+            ["instagram_url"],
+        )
+
+        self.assertEqual(
+            queue,
+            [
+                {
+                    "row_index": 2,
+                    "business_name": "",
+                    "website": "https://both.example",
+                    "targets": ["instagram_url"],
+                }
+            ],
+        )
+
+    def test_apply_checkpoint_filter_is_target_specific(self) -> None:
+        """Resume should skip attempted fields without hiding other missing fields."""
+        queue = [
+            {
+                "row_index": 2,
+                "business_name": "Ready Plumbing",
+                "website": "https://ready.example",
+                "targets": ["email", "instagram_url"],
+            },
+            {
+                "row_index": 3,
+                "business_name": "Done HVAC",
+                "website": "https://done.example",
+                "targets": ["email"],
+            },
+        ]
+
+        filtered = apply_checkpoint_filter(
+            queue,
+            {"email": {2, 3}, "instagram_url": set()},
+        )
+
+        self.assertEqual(
+            filtered,
+            [
+                {
+                    "row_index": 2,
+                    "business_name": "Ready Plumbing",
+                    "website": "https://ready.example",
+                    "targets": ["instagram_url"],
                 }
             ],
         )

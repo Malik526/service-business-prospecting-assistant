@@ -365,6 +365,30 @@ After each run, the CLI prints:
 
 ---
 
+## Contact Backfill
+
+Use `backfill_emails.py` to fill missing contact fields on existing sheet rows
+without overwriting populated cells:
+
+```bash
+python3 backfill_emails.py
+python3 backfill_emails.py --skip-instagram
+python3 backfill_emails.py --skip-email
+python3 backfill_emails.py --skip-email --skip-instagram
+```
+
+By default, the script backfills both `Email` and `Instagram URL`. Use
+`--skip-instagram` for email-only runs, `--skip-email` for Instagram-only runs,
+and `--dry-run` to preview writes without changing the sheet. The script uses
+the live header map, so writes go to the current `Email` and `Instagram URL`
+columns even if columns have been rearranged.
+
+`--resume` reads `backfill_checkpoint.json` and skips only the specific field
+attempts already completed. For example, an earlier email attempt does not hide
+the same row from a later Instagram-only run.
+
+---
+
 ## Pagination
 
 `MAX_PAGES_PER_CATEGORY` controls Google Places API pagination per category search, not Google Sheets pagination.

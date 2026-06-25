@@ -1,17 +1,18 @@
 """backfill_emails.py
 
-Fault-tolerant email backfill script for existing Google Sheet prospects.
+Fault-tolerant contact backfill script for existing Google Sheet prospects.
 
-Reads all rows, finds those with a Website but no Email, then processes them
-in batches of 50 using a parallel ThreadPoolExecutor. Each batch is written to
-the sheet immediately after it completes — no data is lost if the script is
-interrupted. A JSON checkpoint file records which rows have been attempted so
---resume can skip them on the next run.
+Reads all rows, finds those with a Website and missing requested contact fields,
+then processes them in batches of 50 using a parallel ThreadPoolExecutor. Each
+batch is written to the sheet immediately after it completes — no data is lost
+if the script is interrupted. A JSON checkpoint file records which rows have
+been attempted per field so --resume can skip them on the next run.
 
 Run:
-    python3 backfill_emails.py             # full live run
-    python3 backfill_emails.py --dry-run   # extract and preview, no writes
-    python3 backfill_emails.py --resume    # skip checkpointed rows, continue
+    python3 backfill_emails.py                          # email + Instagram
+    python3 backfill_emails.py --skip-instagram         # email only
+    python3 backfill_emails.py --skip-email             # Instagram only
+    python3 backfill_emails.py --skip-email --skip-instagram
 
 Dependencies: same virtualenv as main.py (requests, google-api-python-client).
 """
@@ -37,7 +38,7 @@ from googleapiclient.errors import HttpError
 
 from config import Config, load_config
 from google_sheets import GoogleSheetsClient, SheetSchema, column_index_to_letter
-from pipeline.social import extract_email
+from pipeline.social import extract_email, extract_instagram_url
 
 # Socket-level safety net — catches hangs that requests timeout alone misses.
 # Must be set before any network calls are made, including SSL handshakes.
@@ -58,8 +59,8 @@ _BATCH_TIMEOUT = 60
 # Per-future result() timeout — safety net on top of requests' 4s timeout.
 _FUTURE_TIMEOUT = 5
 
-# Hard timeout for one website email extraction process.
-_EMAIL_PROCESS_TIMEOUT = 10
+# Hard timeout for one website contact extraction process.
+_CONTACT_PROCESS_TIMEOUT = 15
 
 # Retry limit for each batch write call.
 _WRITE_RETRIES = 1
@@ -68,10 +69,10 @@ _WRITE_RETRIES = 1
 # --- CLI ---
 
 def parse_args() -> argparse.Namespace:
-    """Parse CLI args; supports --dry-run and --resume."""
+    """Parse CLI args for live/dry-run backfill target selection."""
     parser = argparse.ArgumentParser(
         description=(
-            "Backfill the Email column for existing prospects in the Google Sheet. "
+            "Backfill Email and Instagram URL columns for existing prospects. "
             "Processes in batches of 50, writes immediately, and checkpoints progress."
         )
     )
@@ -85,36 +86,73 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Load checkpoint file and skip rows already processed.",
     )
+    parser.add_argument(
+        "--skip-email",
+        action="store_true",
+        help="Do not extract or write missing Email values.",
+    )
+    parser.add_argument(
+        "--skip-instagram",
+        action="store_true",
+        help="Do not extract or write missing Instagram URL values.",
+    )
     return parser.parse_args()
+
+
+def selected_targets(args: argparse.Namespace) -> list[str]:
+    """Return the contact fields selected by CLI flags."""
+    targets = []
+    if not args.skip_email:
+        targets.append("email")
+    if not args.skip_instagram:
+        targets.append("instagram_url")
+    return targets
 
 
 # --- Checkpoint ---
 
-def load_checkpoint(resume: bool) -> set[int]:
-    """Return the set of already-processed row indices from the checkpoint file.
+def load_checkpoint(resume: bool) -> dict[str, set[int]]:
+    """Return already-processed row indices per target field.
 
-    Returns an empty set when --resume is not passed or the file does not exist.
+    Returns empty target sets when --resume is not passed or the file does not
+    exist. Older checkpoint files stored a plain row list for email-only runs;
+    those are treated as completed email rows for backward compatibility.
     """
+    empty_checkpoint = {"email": set(), "instagram_url": set()}
     if not resume:
-        return set()
+        return empty_checkpoint
     if not os.path.exists(CHECKPOINT_FILE):
         print(f"No checkpoint file found at {CHECKPOINT_FILE} — starting fresh.")
-        return set()
+        return empty_checkpoint
     try:
         with open(CHECKPOINT_FILE) as f:
-            rows = set(json.load(f))
-        print(f"Resuming from checkpoint — {len(rows)} rows already processed.")
-        return rows
+            payload = json.load(f)
+
+        if isinstance(payload, list):
+            checkpoint = {"email": set(payload), "instagram_url": set()}
+        else:
+            checkpoint = {
+                "email": set(payload.get("email", [])),
+                "instagram_url": set(payload.get("instagram_url", [])),
+            }
+
+        completed_count = sum(len(rows) for rows in checkpoint.values())
+        print(f"Resuming from checkpoint — {completed_count} field attempt(s) already processed.")
+        return checkpoint
     except Exception as exc:
         print(f"Warning: could not load checkpoint ({exc}) — starting fresh.")
-        return set()
+        return empty_checkpoint
 
 
-def save_checkpoint(completed_rows: set[int]) -> None:
-    """Persist the completed row-index set to disk so --resume can use it."""
+def save_checkpoint(completed_rows: dict[str, set[int]]) -> None:
+    """Persist completed row-index sets per target field for --resume."""
     try:
         with open(CHECKPOINT_FILE, "w") as f:
-            json.dump(list(completed_rows), f)
+            payload = {
+                target: sorted(rows)
+                for target, rows in completed_rows.items()
+            }
+            json.dump(payload, f)
     except Exception as exc:
         print(f"Warning: checkpoint save failed — {exc}")
 
@@ -147,26 +185,40 @@ def read_all_rows(
     return schema, data_rows
 
 
-def find_column_indices(schema: SheetSchema) -> tuple[int, int]:
-    """Return (website_col_index, email_col_index) from the live schema.
+def find_column_indices(
+    schema: SheetSchema,
+    targets: list[str],
+) -> tuple[int, dict[str, int]]:
+    """Return website and selected contact columns from the live schema.
 
     Dynamic lookup so the script survives column reorders. Exits if missing.
     """
-    missing = [col for col in ("Website", "Email") if col not in schema.columns]
+    target_to_header = {
+        "email": "Email",
+        "instagram_url": "Instagram URL",
+    }
+    required_headers = ["Website"] + [target_to_header[target] for target in targets]
+    missing = [col for col in required_headers if col not in schema.columns]
     if missing:
         print(f"ERROR: Required column(s) not found: {missing}")
         print(f"       Headers present: {schema.headers}")
         sys.exit(1)
-    return schema.columns["Website"], schema.columns["Email"]
+
+    contact_cols = {
+        target: schema.columns[target_to_header[target]]
+        for target in targets
+    }
+    return schema.columns["Website"], contact_cols
 
 
 def build_enrichment_queue(
     data_rows: list[list[str]],
     schema: SheetSchema,
     website_col: int,
-    email_col: int,
+    contact_cols: dict[str, int],
+    targets: list[str],
 ) -> list[dict[str, Any]]:
-    """Return queue items for rows that have a website but no email.
+    """Return rows that have a website and missing requested contact fields.
 
     row_index is the 1-based Sheets row number (header = row 1,
     first data row = row 2). Short rows are padded before index access.
@@ -176,40 +228,62 @@ def build_enrichment_queue(
     for i, row in enumerate(data_rows):
         padded = row + [""] * (len(schema.headers) - len(row))
         website = padded[website_col].strip()
-        email = padded[email_col].strip()
-        if website and not email:
-            business_name = (
-                padded[business_col].strip()
-                if business_col is not None
-                else ""
-            )
-            queue.append(
-                {
-                    "row_index": i + 2,
-                    "business_name": business_name,
-                    "website": website,
-                }
-            )
+        if not website:
+            continue
+
+        needed_targets = [
+            target
+            for target in targets
+            if not padded[contact_cols[target]].strip()
+        ]
+        if targets and not needed_targets:
+            continue
+
+        business_name = (
+            padded[business_col].strip()
+            if business_col is not None
+            else ""
+        )
+        queue.append(
+            {
+                "row_index": i + 2,
+                "business_name": business_name,
+                "website": website,
+                "targets": needed_targets,
+            }
+        )
     return queue
 
 
 # --- Extraction ---
 
-def _extract_email_process(website: str, result_queue: Queue) -> None:
-    """Run extract_email() in a child process and return the email through a queue."""
+def _extract_contact_process(
+    website: str,
+    targets: list[str],
+    result_queue: Queue,
+) -> None:
+    """Run selected extractors in a child process and return results through a queue."""
+    results = {"email": "", "instagram_url": ""}
     try:
-        result_queue.put(extract_email(website))
+        if "email" in targets:
+            results["email"] = extract_email(website)
+        if "instagram_url" in targets:
+            results["instagram_url"] = extract_instagram_url(website)
+        result_queue.put(results)
     except Exception:
-        result_queue.put("")
+        result_queue.put(results)
 
 
-def _extract_email_with_process_timeout(website: str) -> str:
-    """Run extract_email() with a killable process-level timeout."""
+def _extract_contact_with_process_timeout(
+    website: str,
+    targets: list[str],
+) -> dict[str, str]:
+    """Run selected contact extraction with a killable process-level timeout."""
     result_queue: Queue = Queue(maxsize=1)
-    process = Process(target=_extract_email_process, args=(website, result_queue))
+    process = Process(target=_extract_contact_process, args=(website, targets, result_queue))
     process.daemon = True
     process.start()
-    process.join(_EMAIL_PROCESS_TIMEOUT)
+    process.join(_CONTACT_PROCESS_TIMEOUT)
 
     if process.is_alive():
         process.terminate()
@@ -217,26 +291,27 @@ def _extract_email_with_process_timeout(website: str) -> str:
         if process.is_alive():
             process.kill()
             process.join()
-        return ""
+        return {"email": "", "instagram_url": ""}
 
     try:
         return result_queue.get_nowait()
     except Empty:
-        return ""
+        return {"email": "", "instagram_url": ""}
 
 
-def extract_batch(batch: list[dict[str, Any]]) -> dict[int, str]:
-    """Run extract_email() in parallel for one batch; return row_index → email.
+def extract_batch(batch: list[dict[str, Any]]) -> dict[int, dict[str, str]]:
+    """Run selected contact extractors for one batch.
 
     All rows in the batch are recorded in the result — empty string for rows
-    where no email was found or that timed out. This ensures every attempted
-    row is checkpointed even when extraction yields nothing.
+    where nothing was found or that timed out. This ensures every attempted row
+    is checkpointed for the requested fields even when extraction yields nothing.
     """
-    results: dict[int, str] = {}
+    results: dict[int, dict[str, str]] = {}
 
-    def _enrich(item: dict[str, Any]) -> tuple[int, str]:
-        """Extract email for one row and return (row_index, email)."""
-        return item["row_index"], _extract_email_with_process_timeout(item["website"])
+    def _enrich(item: dict[str, Any]) -> tuple[int, dict[str, str]]:
+        """Extract selected contact fields for one row."""
+        values = _extract_contact_with_process_timeout(item["website"], item["targets"])
+        return item["row_index"], values
 
     executor = ThreadPoolExecutor(max_workers=_MAX_WORKERS)
     timed_out = False
@@ -246,11 +321,11 @@ def extract_batch(batch: list[dict[str, Any]]) -> dict[int, str]:
         try:
             for future in as_completed(futures, timeout=_BATCH_TIMEOUT):
                 try:
-                    row_index, email = future.result(timeout=_FUTURE_TIMEOUT)
-                    results[row_index] = email
+                    row_index, values = future.result(timeout=_FUTURE_TIMEOUT)
+                    results[row_index] = values
                 except Exception:
                     # Record the row as attempted with no result.
-                    results[futures[future]["row_index"]] = ""
+                    results[futures[future]["row_index"]] = {"email": "", "instagram_url": ""}
         except FuturesTimeoutError:
             timed_out = True
             unfinished = [
@@ -274,6 +349,28 @@ def extract_batch(batch: list[dict[str, Any]]) -> dict[int, str]:
     return results
 
 
+def apply_checkpoint_filter(
+    queue: list[dict[str, Any]],
+    completed_rows: dict[str, set[int]],
+) -> list[dict[str, Any]]:
+    """Remove target fields already attempted for each row from the queue."""
+    filtered_queue = []
+    for item in queue:
+        remaining_targets = [
+            target
+            for target in item["targets"]
+            if item["row_index"] not in completed_rows.get(target, set())
+        ]
+        if not remaining_targets:
+            continue
+
+        filtered_item = item.copy()
+        filtered_item["targets"] = remaining_targets
+        filtered_queue.append(filtered_item)
+
+    return filtered_queue
+
+
 # --- Writing ---
 
 def _make_sheets_client(config: Config) -> GoogleSheetsClient:
@@ -286,21 +383,25 @@ def _make_sheets_client(config: Config) -> GoogleSheetsClient:
 
 
 def write_batch_results(
-    results: dict[int, str],
-    email_col: int,
+    results: dict[int, dict[str, str]],
+    contact_cols: dict[str, int],
     config: Config,
 ) -> int:
-    """Write one batch of email results to the sheet; reconnects before each attempt.
+    """Write one batch of contact results to the sheet; reconnects per attempt.
 
-    Returns the number of emails successfully written.
-    Only non-empty emails are included in the write payload.
+    Returns the number of non-empty contact values successfully written.
+    Only non-empty values are included in the write payload.
     """
-    col_letter = column_index_to_letter(email_col)
-    batch_data = [
-        {"range": f"{config.sheet_name}!{col_letter}{row_index}", "values": [[email]]}
-        for row_index, email in results.items()
-        if email
-    ]
+    batch_data = []
+    for row_index, values in results.items():
+        for target, value in values.items():
+            if not value or target not in contact_cols:
+                continue
+
+            col_letter = column_index_to_letter(contact_cols[target])
+            batch_data.append(
+                {"range": f"{config.sheet_name}!{col_letter}{row_index}", "values": [[value]]}
+            )
 
     if not batch_data:
         return 0
@@ -313,7 +414,7 @@ def write_batch_results(
                 spreadsheetId=config.google_sheet_id,
                 body={"valueInputOption": "RAW", "data": batch_data},
             ).execute()
-            print(f"  Wrote {len(batch_data)} email(s) to sheet.")
+            print(f"  Wrote {len(batch_data)} contact value(s) to sheet.")
             return len(batch_data)
         except HttpError as exc:
             print(f"  Write attempt {attempt} failed: {exc}")
@@ -326,7 +427,7 @@ def write_batch_results(
 
     print(
         f"  ERROR: Write failed after {_WRITE_RETRIES + 1} attempts — "
-        f"{len(batch_data)} email(s) not saved."
+        f"{len(batch_data)} contact value(s) not saved."
     )
     return 0
 
@@ -338,30 +439,32 @@ def print_summary(
     total_to_enrich: int,
     processed_this_run: int,
     emails_found: int,
+    instagram_found: int,
+    targets: list[str],
     dry_run: bool,
 ) -> None:
     """Print the final run summary."""
     sep = "=" * 50
     skipped = total_rows - total_to_enrich
-    still_empty = total_to_enrich - emails_found
-    success_rate = (
-        f"{round(emails_found / total_to_enrich * 100)}%"
-        if total_to_enrich
-        else "N/A"
-    )
+    values_found = emails_found + instagram_found
 
     print(f"\n{sep}")
-    print("EMAIL BACKFILL COMPLETE" + (" (DRY RUN)" if dry_run else ""))
+    print("CONTACT BACKFILL COMPLETE" + (" (DRY RUN)" if dry_run else ""))
     print(sep)
     print(f"Total prospects in sheet:              {total_rows}")
+    print(f"Requested targets:                     {', '.join(targets) if targets else 'none'}")
     print(f"Prospects needing enrichment:          {total_to_enrich}")
     print(f"Processed this run:                    {processed_this_run}")
-    print(f"Skipped (email exists or no website):  {skipped}")
-    print(f"Emails found:                          {emails_found}")
-    print(f"Success rate:                          {success_rate}")
-    print(f"Still empty after run:                 {still_empty}")
+    print(f"Skipped (complete or no website):      {skipped}")
+    if "email" in targets:
+        print(f"Emails found:                          {emails_found}")
+    if "instagram_url" in targets:
+        print(f"Instagram URLs found:                  {instagram_found}")
+    print(f"Contact values found:                  {values_found}")
     if dry_run:
         print("\nDRY RUN — no changes were written to the sheet.")
+    elif not targets:
+        print("\nNo targets selected — no extraction or writes were performed.")
     else:
         print(f"\nCheckpoint saved to: {CHECKPOINT_FILE}")
         print("Run with --resume to continue if interrupted.")
@@ -373,6 +476,7 @@ def print_summary(
 def main() -> None:
     """Orchestrate the full backfill from read to checkpoint."""
     args = parse_args()
+    targets = selected_targets(args)
     config = load_config()
 
     # --- Read sheet ---
@@ -386,27 +490,33 @@ def main() -> None:
     print(f"Read {len(data_rows)} data rows.")
 
     # --- Locate columns ---
-    website_col, email_col = find_column_indices(schema)
+    website_col, contact_cols = find_column_indices(schema, targets)
 
     # --- Build full enrichment queue ---
-    full_queue = build_enrichment_queue(data_rows, schema, website_col, email_col)
+    full_queue = build_enrichment_queue(data_rows, schema, website_col, contact_cols, targets)
     print(
         f"Found {len(full_queue)} prospects needing enrichment "
-        "(website present, email empty)."
+        "(website present, requested field empty)."
     )
-    print(f"Skipping {len(data_rows) - len(full_queue)} (already have email or no website).")
+    print(f"Skipping {len(data_rows) - len(full_queue)} (already complete or no website).")
 
-    if not full_queue:
-        print("\nNothing to do — all eligible prospects already have an email.")
+    if not targets:
+        print("\nBoth --skip-email and --skip-instagram were passed.")
+        print("No extraction or sheet writes will be performed.")
         sys.exit(0)
 
     # --- Apply checkpoint filter ---
-    completed_rows: set[int] = load_checkpoint(args.resume)
-    queue = [item for item in full_queue if item["row_index"] not in completed_rows]
+    if not full_queue:
+        print("\nNothing to do — all eligible prospects already have requested contact data.")
+        sys.exit(0)
 
-    if completed_rows and not args.resume:
+    completed_rows = load_checkpoint(args.resume)
+    queue = apply_checkpoint_filter(full_queue, completed_rows)
+
+    checkpoint_count = sum(len(rows) for rows in completed_rows.values())
+    if checkpoint_count and not args.resume:
         # Checkpoint exists but --resume not passed — warn and continue fresh.
-        print(f"Note: checkpoint file exists with {len(completed_rows)} rows. "
+        print(f"Note: checkpoint file exists with {checkpoint_count} field attempt(s). "
               f"Pass --resume to skip them.")
 
     print(f"Rows to process this run: {len(queue)}")
@@ -418,6 +528,7 @@ def main() -> None:
     # --- Process in batches ---
     total_batches = max(1, (len(queue) + BATCH_SIZE - 1) // BATCH_SIZE)
     total_emails_found = 0
+    total_instagram_found = 0
 
     for batch_num, batch_start in enumerate(range(0, len(queue), BATCH_SIZE), 1):
         batch = queue[batch_start : batch_start + BATCH_SIZE]
@@ -430,24 +541,34 @@ def main() -> None:
 
         # --- Extract ---
         batch_results = extract_batch(batch)
-        batch_emails = sum(1 for e in batch_results.values() if e)
-        print(f"  Emails found in batch: {batch_emails}/{len(batch)}")
+        batch_emails = sum(1 for values in batch_results.values() if values.get("email"))
+        batch_instagram = sum(1 for values in batch_results.values() if values.get("instagram_url"))
+        if "email" in targets:
+            print(f"  Emails found in batch: {batch_emails}/{len(batch)}")
+        if "instagram_url" in targets:
+            print(f"  Instagram URLs found in batch: {batch_instagram}/{len(batch)}")
 
-        # --- Update completed set (mark attempted regardless of result) ---
+        # --- Update completed set (mark attempted requested targets regardless of result) ---
+        batch_targets_by_row = {item["row_index"]: item["targets"] for item in batch}
         for row_index in batch_results:
-            completed_rows.add(row_index)
+            for target in batch_targets_by_row.get(row_index, []):
+                completed_rows.setdefault(target, set()).add(row_index)
 
         # --- Write or dry-run ---
         if args.dry_run:
-            col_letter = column_index_to_letter(email_col)
-            for row_index, email in batch_results.items():
-                if email:
+            for row_index, values in batch_results.items():
+                for target, value in values.items():
+                    if not value or target not in contact_cols:
+                        continue
+                    col_letter = column_index_to_letter(contact_cols[target])
                     cell = f"{config.sheet_name}!{col_letter}{row_index}"
-                    print(f"  DRY RUN: {cell}  →  {email}")
+                    print(f"  DRY RUN: {cell}  →  {value}")
             total_emails_found += batch_emails
+            total_instagram_found += batch_instagram
         else:
-            written = write_batch_results(batch_results, email_col, config)
-            total_emails_found += written
+            write_batch_results(batch_results, contact_cols, config)
+            total_emails_found += batch_emails
+            total_instagram_found += batch_instagram
             # Save checkpoint after every successful batch write.
             save_checkpoint(completed_rows)
 
@@ -457,6 +578,8 @@ def main() -> None:
         total_to_enrich=len(full_queue),
         processed_this_run=len(queue),
         emails_found=total_emails_found,
+        instagram_found=total_instagram_found,
+        targets=targets,
         dry_run=args.dry_run,
     )
 

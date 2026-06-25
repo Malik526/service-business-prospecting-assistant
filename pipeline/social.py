@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import logging
 import re
+from html import unescape
+from urllib.parse import urljoin
 
 import requests
 
@@ -45,6 +47,13 @@ def extract_instagram_url(website_url: str) -> str:
     Returns:
         Instagram URL string or empty string if not found.
     """
+    if not website_url:
+        return ""
+
+    website_url = website_url.strip()
+    if not website_url.startswith(("http://", "https://")):
+        website_url = f"https://{website_url}"
+
     try:
         response = requests.get(
             website_url,
@@ -94,6 +103,21 @@ _IGNORE_EMAIL_DOMAINS = [
     "w3.org",
 ]
 
+# Common non-contact file extensions that can appear next to email-like tokens.
+_IGNORE_EMAIL_SUFFIXES = (
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".svg",
+    ".css",
+    ".js",
+)
+
+# Lightweight page list that catches common contact-page URL conventions.
+_EMAIL_FALLBACK_PATHS = ("/contact", "/contact-us", "/about", "/about-us")
+
 # Matches any string that looks like an email address.
 _EMAIL_PATTERN = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
 
@@ -121,6 +145,13 @@ def extract_email(website_url: str) -> str:
 
     headers = {"User-Agent": _USER_AGENT}
 
+    def _normalize_url(url: str) -> str:
+        """Return a fetchable URL, adding https:// when the scheme is missing."""
+        stripped = url.strip()
+        if stripped.startswith(("http://", "https://")):
+            return stripped
+        return f"https://{stripped}"
+
     def _is_valid_business_email(email: str) -> bool:
         """Return True if the email looks like a real business contact address."""
         lower = email.lower()
@@ -128,16 +159,28 @@ def extract_email(website_url: str) -> str:
             return False
         if lower.startswith("noreply") or lower.startswith("no-reply"):
             return False
+        if lower.endswith(_IGNORE_EMAIL_SUFFIXES):
+            return False
         return True
 
     def _extract_from_html(html: str) -> str:
         """Return the first valid business email found in an HTML string."""
+        decoded_html = unescape(html)
+        seen = set()
+
         # mailto: links are the most authoritative — check them first.
-        for email in re.findall(r"mailto:(" + _EMAIL_PATTERN + r")", html):
+        for email in re.findall(r"mailto:(" + _EMAIL_PATTERN + r")", decoded_html):
+            email = email.strip().strip(".,;:)")
             if _is_valid_business_email(email):
                 return email
+
         # Fall back to bare email addresses in the page body.
-        for email in re.findall(_EMAIL_PATTERN, html):
+        for email in re.findall(_EMAIL_PATTERN, decoded_html):
+            email = email.strip().strip(".,;:)")
+            lower = email.lower()
+            if lower in seen:
+                continue
+            seen.add(lower)
             if _is_valid_business_email(email):
                 return email
         return ""
@@ -157,13 +200,13 @@ def extract_email(website_url: str) -> str:
             logger.warning("Email extraction failed for %s: %s", url, exc)
             return ""
 
-    # --- Homepage pass ---
-    html = _fetch_html(website_url)
-    email = _extract_from_html(html)
-    if email:
-        return email
+    normalized_url = _normalize_url(website_url)
 
-    # --- /contact fallback ---
-    contact_url = website_url.rstrip("/") + "/contact"
-    html = _fetch_html(contact_url)
-    return _extract_from_html(html)
+    # --- Homepage and lightweight fallback pages ---
+    for page_url in [normalized_url, *[urljoin(normalized_url.rstrip("/") + "/", path) for path in _EMAIL_FALLBACK_PATHS]]:
+        html = _fetch_html(page_url)
+        email = _extract_from_html(html)
+        if email:
+            return email
+
+    return ""
