@@ -2,6 +2,46 @@
 
 ---
 
+## [2026-06-25 17:13 EDT] — fix: serialize Google Sheets writes with a file lock
+
+**Files Modified:** `config.py`, `google_sheets.py`, `README.md`, `tests/test_dynamic_schema.py`, `CHANGELOG.md`
+
+### Summary
+Added a cross-process file lock around Google Sheets prospect appends so
+multiple prospecting runs can execute in parallel without racing on the final
+dedupe-and-append step.
+
+### Behavior
+- Added explicit `SHEET_ID`, `CREDENTIALS_PATH`, and `SHEET_NAME` constants in
+  `config.py`, sourced from `.env` with the shared service-account path fallback.
+- Added `get_lock_file()`, `acquire_sheet_lock()`, and `release_sheet_lock()`
+  in `google_sheets.py`.
+- `append_prospects()` now acquires the lock before it refreshes schema, reads
+  existing Place IDs, appends rows, and reapplies dropdown validation.
+- Lock acquisition logs when a process is waiting, when it acquires the lock,
+  and when it releases the lock, along with the target spreadsheet ID and tab
+  name for the write.
+- Lock acquisition times out after 30 seconds instead of hanging indefinitely.
+
+### Verification
+- `python3 -m py_compile config.py google_sheets.py tests/test_dynamic_schema.py`
+- Added local test coverage for:
+  - lock wrapping around `append_prospects()`
+  - timeout behavior when the lock cannot be acquired
+  - cross-process blocking using a second Python subprocess
+- Local parallel lock demo output:
+  - `[Lock acquired] path=/tmp/moreclientsco_sheet_write.lock waited=0.00s`
+  - `Terminal 1: inside critical section`
+  - `[Lock released] path=/tmp/moreclientsco_sheet_write.lock`
+  - `[Waiting for lock] path=/tmp/moreclientsco_sheet_write.lock`
+  - `[Lock acquired] path=/tmp/moreclientsco_sheet_write.lock waited=1.03s`
+  - `Terminal 2: inside critical section`
+  - `[Lock released] path=/tmp/moreclientsco_sheet_write.lock`
+- Full `unittest` execution remains blocked in this environment because
+  `googleapiclient` is not installed.
+
+---
+
 ## [2026-06-25 17:04 EDT] — feat: auto-populate Date Added for new prospects
 
 **Files Modified:** `google_sheets.py`, `main.py`, `README.md`, `tests/test_dynamic_schema.py`, `config/PROSPECTS_SCHEMA.json`, `CHANGELOG.md`

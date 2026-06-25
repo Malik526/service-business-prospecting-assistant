@@ -238,7 +238,7 @@ cp .env.example .env
 This project uses two different Google authentication methods:
 
 - **Google Places API key**: used for Places and Geocoding requests. The key is stored in `.env` as `GOOGLE_PLACES_API_KEY`.
-- **Google Sheets service account**: used to read existing prospects and append new rows. The service account JSON file is stored locally in `credentials/`.
+- **Google Sheets service account**: used to read existing prospects and append new rows. The service account JSON path is loaded from `.env` as `GOOGLE_SERVICE_ACCOUNT_FILE`, and `config.py` falls back to `~/growth_agency/credentials/service-account.json` if that variable is omitted.
 
 The script acts as a backend automation tool. No OAuth user login flow is required because it does not act as a signed-in human user. Instead, the Google Sheet must be shared directly with the service account email as an Editor.
 
@@ -263,7 +263,7 @@ Copy `.env.example` to `.env`, then fill in the values:
 ```bash
 GOOGLE_PLACES_API_KEY=your_google_api_key
 GOOGLE_SHEET_ID=your_google_sheet_id
-GOOGLE_SERVICE_ACCOUNT_FILE=./credentials/service-account.json
+GOOGLE_SERVICE_ACCOUNT_FILE=~/growth_agency/credentials/service-account.json
 GOOGLE_SHEET_NAME=PROSPECTS
 MAX_PAGES_PER_CATEGORY=3
 ```
@@ -298,13 +298,13 @@ MAX_PAGES_PER_CATEGORY=3
 3. Save the file locally as:
 
 ```
-credentials/service-account.json
+~/growth_agency/credentials/service-account.json
 ```
 
 4. Confirm `.env` points to that file:
 
 ```bash
-GOOGLE_SERVICE_ACCOUNT_FILE=./credentials/service-account.json
+GOOGLE_SERVICE_ACCOUNT_FILE=~/growth_agency/credentials/service-account.json
 ```
 
 Credential files should never be committed to GitHub. The project `.gitignore` excludes `.env` and `credentials/`.
@@ -329,6 +329,27 @@ The tool will create and maintain the header row automatically. Status and Last 
 ### Dynamic PROSPECTS Schema
 
 On every run, the tool reads row 1 of the `PROSPECTS` tab and builds a live column map. Scraper appends, Place ID duplicate checks, dropdown validations, and email backfills all use that map instead of fixed column positions.
+
+### Parallel Write Safety
+
+Google Sheets writes are protected by a cross-process file lock at:
+
+```text
+/tmp/moreclientsco_sheet_write.lock
+```
+
+This matters when you run multiple prospecting instances in parallel from
+different terminals. Only one process is allowed into the final dedupe and
+append section at a time, which prevents concurrent runs from appending the
+same new Place ID rows simultaneously.
+
+If the lock is already held, the waiting process logs:
+
+- `[Waiting for lock]`
+- `[Lock acquired]`
+- `[Lock released]`
+
+Lock acquisition times out after 30 seconds to avoid indefinite hangs.
 
 The latest detected schema is cached at:
 

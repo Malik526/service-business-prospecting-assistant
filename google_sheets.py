@@ -20,8 +20,12 @@ live header mapping.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
+import os
+import tempfile
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -125,6 +129,50 @@ PROSPECT_FIELD_TO_COLUMN = {
     "state": "State",
     "zip": "ZIP",
 }
+
+
+def get_lock_file() -> str:
+    """Return the path to the cross-process sheet write lock file."""
+    return os.path.join(tempfile.gettempdir(), "moreclientsco_sheet_write.lock")
+
+
+def acquire_sheet_lock(timeout: float = 30) -> Any:
+    """Acquire an exclusive lock for sheet writes or raise after the timeout."""
+    lock_path = get_lock_file()
+    lock_file = open(lock_path, "w", encoding="utf-8")
+    start = time.time()
+    has_logged_wait = False
+
+    while True:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            waited = time.time() - start
+            logger.info(
+                "[Lock acquired] path=%s waited=%.2fs",
+                lock_path,
+                waited,
+            )
+            return lock_file
+        except OSError:
+            elapsed = time.time() - start
+            if elapsed > timeout:
+                lock_file.close()
+                raise TimeoutError(
+                    f"Could not acquire sheet lock after {timeout}s: {lock_path}"
+                )
+            if not has_logged_wait:
+                logger.info("[Waiting for lock] path=%s", lock_path)
+                has_logged_wait = True
+            time.sleep(0.5)
+
+
+def release_sheet_lock(lock_file: Any) -> None:
+    """Release an exclusive sheet write lock."""
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        logger.info("[Lock released] path=%s", getattr(lock_file, "name", "<unknown>"))
+    finally:
+        lock_file.close()
 
 
 @dataclass(frozen=True)
@@ -341,44 +389,63 @@ class GoogleSheetsClient:
         if not prospects:
             return {"appended": 0, "skipped_duplicates": 0}
 
-        schema = self.ensure_header()
-        existing_place_ids = self.get_existing_place_ids(schema)
-
-        appendable = []
-        skipped_duplicates = 0
-        for prospect in prospects:
-            place_id = str(prospect.get("place_id", "")).strip()
-            if place_id and place_id in existing_place_ids:
-                skipped_duplicates += 1
-                continue
-            appendable.append(prospect)
-            if place_id:
-                existing_place_ids.add(place_id)
-
-        if not appendable:
+        lock_file = acquire_sheet_lock(timeout=30)
+        try:
             logger.info(
-                "No new prospects appended. Skipped %d duplicate Place ID(s).",
+                "Writing prospects to spreadsheet_id=%s sheet_name=%s prospect_count=%d",
+                self.sheet_id,
+                self.sheet_name,
+                len(prospects),
+            )
+            schema = self.ensure_header()
+            existing_place_ids = self.get_existing_place_ids(schema)
+
+            appendable = []
+            skipped_duplicates = 0
+            for prospect in prospects:
+                place_id = str(prospect.get("place_id", "")).strip()
+                if place_id and place_id in existing_place_ids:
+                    skipped_duplicates += 1
+                    continue
+                appendable.append(prospect)
+                if place_id:
+                    existing_place_ids.add(place_id)
+
+            if not appendable:
+                logger.info(
+                    "No new prospects appended to spreadsheet_id=%s sheet_name=%s. "
+                    "Skipped %d duplicate Place ID(s).",
+                    self.sheet_id,
+                    self.sheet_name,
+                    skipped_duplicates,
+                )
+                return {"appended": 0, "skipped_duplicates": skipped_duplicates}
+
+            rows = [prospect_to_sheet_row(prospect, schema) for prospect in appendable]
+            last_col = column_index_to_letter(len(schema.headers) - 1)
+            self.service.spreadsheets().values().append(
+                spreadsheetId=self.sheet_id,
+                range=f"{self.sheet_name}!A:{last_col}",
+                valueInputOption="RAW",
+                insertDataOption="INSERT_ROWS",
+                body={"values": rows},
+            ).execute()
+
+            self.apply_dropdown_validations(schema=schema)
+            logger.info(
+                "Batch write complete for spreadsheet_id=%s sheet_name=%s. "
+                "Appended %d prospect(s). Skipped %d duplicate Place ID(s).",
+                self.sheet_id,
+                self.sheet_name,
+                len(appendable),
                 skipped_duplicates,
             )
-            return {"appended": 0, "skipped_duplicates": skipped_duplicates}
-
-        rows = [prospect_to_sheet_row(prospect, schema) for prospect in appendable]
-        last_col = column_index_to_letter(len(schema.headers) - 1)
-        self.service.spreadsheets().values().append(
-            spreadsheetId=self.sheet_id,
-            range=f"{self.sheet_name}!A:{last_col}",
-            valueInputOption="RAW",
-            insertDataOption="INSERT_ROWS",
-            body={"values": rows},
-        ).execute()
-
-        self.apply_dropdown_validations(schema=schema)
-        logger.info(
-            "Appended %d prospect(s). Skipped %d duplicate Place ID(s).",
-            len(appendable),
-            skipped_duplicates,
-        )
-        return {"appended": len(appendable), "skipped_duplicates": skipped_duplicates}
+            return {
+                "appended": len(appendable),
+                "skipped_duplicates": skipped_duplicates,
+            }
+        finally:
+            release_sheet_lock(lock_file)
 
     def get_existing_place_ids(self, schema: SheetSchema | None = None) -> set[str]:
         """Return existing Place IDs using the live Place ID column mapping."""

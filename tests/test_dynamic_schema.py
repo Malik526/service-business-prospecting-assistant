@@ -6,9 +6,13 @@ serialization, and email backfill queue construction.
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import time
 import unittest
 from argparse import Namespace
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import mock_open, patch
 
 from backfill_emails import apply_checkpoint_filter, build_enrichment_queue
 from categories import filter_target_categories
@@ -19,9 +23,11 @@ from google_sheets import (
     DATE_ADDED_COLUMN_INDEX,
     GoogleSheetsClient,
     SHEET_COLUMNS,
+    acquire_sheet_lock,
     build_schema,
     column_index_to_letter,
     prospect_to_sheet_row,
+    release_sheet_lock,
 )
 from main import extract_address_components, selected_extractors
 
@@ -471,6 +477,89 @@ class DynamicSchemaTests(unittest.TestCase):
         validation_range = request["setDataValidation"]["range"]
         self.assertEqual(validation_range["startColumnIndex"], 1)
         self.assertEqual(validation_range["endColumnIndex"], 2)
+
+    def test_append_prospects_wraps_write_with_lock(self) -> None:
+        """Acquire and release the sheet lock around the append critical section."""
+        schema = build_schema(["Place ID", "Business Name", "Status"])
+        client = object.__new__(GoogleSheetsClient)
+        client.sheet_id = "sheet-123"
+        client.sheet_name = "PROSPECTS"
+        client.ensure_header = lambda: schema
+        client.get_existing_place_ids = lambda _schema: set()
+        validation_calls = []
+        client.apply_dropdown_validations = lambda schema=None: validation_calls.append(schema)
+        append_calls = []
+
+        class FakeValues:
+            def append(self, **kwargs: object) -> "FakeValues":
+                append_calls.append(kwargs)
+                return self
+
+            def execute(self) -> dict[str, object]:
+                return {}
+
+        class FakeSpreadsheets:
+            def values(self) -> FakeValues:
+                return FakeValues()
+
+        class FakeService:
+            def spreadsheets(self) -> FakeSpreadsheets:
+                return FakeSpreadsheets()
+
+        client.service = FakeService()
+
+        with patch("google_sheets.acquire_sheet_lock", return_value="lock-handle") as acquire_mock, patch(
+            "google_sheets.release_sheet_lock"
+        ) as release_mock:
+            result = client.append_prospects(
+                [{"place_id": "place-1", "business_name": "Ridge Electric"}]
+            )
+
+        self.assertEqual(result, {"appended": 1, "skipped_duplicates": 0})
+        acquire_mock.assert_called_once_with(timeout=30)
+        release_mock.assert_called_once_with("lock-handle")
+        self.assertEqual(append_calls[0]["spreadsheetId"], "sheet-123")
+        self.assertEqual(append_calls[0]["range"], "PROSPECTS!A:C")
+        self.assertEqual(validation_calls, [schema])
+
+    def test_acquire_sheet_lock_times_out(self) -> None:
+        """Raise TimeoutError when the file lock cannot be acquired in time."""
+        with patch("google_sheets.open", mock_open(), create=True), patch(
+            "google_sheets.fcntl.flock",
+            side_effect=OSError("busy"),
+        ), patch("google_sheets.time.time", side_effect=[0.0, 31.0]), patch(
+            "google_sheets.time.sleep"
+        ):
+            with self.assertRaisesRegex(TimeoutError, "Could not acquire sheet lock"):
+                acquire_sheet_lock(timeout=30)
+
+    def test_sheet_lock_blocks_parallel_processes(self) -> None:
+        """A second process should wait until the first releases the lock."""
+        repo_root = Path(__file__).resolve().parents[1]
+        script = (
+            "from google_sheets import acquire_sheet_lock, release_sheet_lock\n"
+            "lock = acquire_sheet_lock(timeout=2)\n"
+            "print('child-acquired', flush=True)\n"
+            "release_sheet_lock(lock)\n"
+        )
+
+        lock_file = acquire_sheet_lock(timeout=2)
+        try:
+            process = subprocess.Popen(
+                [sys.executable, "-c", script],
+                cwd=repo_root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            time.sleep(0.6)
+            self.assertIsNone(process.poll())
+        finally:
+            release_sheet_lock(lock_file)
+
+        stdout, stderr = process.communicate(timeout=5)
+        self.assertEqual(process.returncode, 0, msg=stderr)
+        self.assertIn("child-acquired", stdout)
 
 
 if __name__ == "__main__":

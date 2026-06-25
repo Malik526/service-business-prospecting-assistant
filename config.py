@@ -15,6 +15,13 @@ load_dotenv()
 DEFAULT_SERVICE_ACCOUNT_FILE = os.path.expanduser(
     "~/growth_agency/credentials/service-account.json"
 )
+DEFAULT_SHEET_NAME = "PROSPECTS"
+SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "").strip()
+CREDENTIALS_PATH = os.getenv(
+    "GOOGLE_SERVICE_ACCOUNT_FILE",
+    DEFAULT_SERVICE_ACCOUNT_FILE,
+).strip()
+SHEET_NAME = os.getenv("GOOGLE_SHEET_NAME", DEFAULT_SHEET_NAME).strip() or DEFAULT_SHEET_NAME
 
 
 @dataclass(frozen=True)
@@ -30,13 +37,10 @@ class Config:
 def load_config() -> Config:
     return Config(
         google_places_api_key=os.getenv("GOOGLE_PLACES_API_KEY", "").strip(),
-        google_sheet_id=os.getenv("GOOGLE_SHEET_ID", "").strip(),
-        google_service_account_file=os.getenv(
-            "GOOGLE_SERVICE_ACCOUNT_FILE",
-            DEFAULT_SERVICE_ACCOUNT_FILE,
-        ).strip(),
+        google_sheet_id=SHEET_ID,
+        google_service_account_file=CREDENTIALS_PATH,
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", "").strip(),
-        sheet_name=os.getenv("GOOGLE_SHEET_NAME", "PROSPECTS").strip() or "PROSPECTS",
+        sheet_name=SHEET_NAME,
         max_pages_per_category=int(os.getenv("MAX_PAGES_PER_CATEGORY", "3")),
     )
 
