@@ -2,6 +2,50 @@
 
 ---
 
+## [2026-06-25 16:29 EDT] — fix: use Google address components for prospect addresses
+
+**Files Modified:** `google_places.py`, `main.py`, `google_sheets.py`, `pipeline/__init__.py`, `README.md`, `tests/test_dynamic_schema.py`, `config/PROSPECTS_SCHEMA.json`, `CHANGELOG.md`
+
+**Files Removed:** `pipeline/address.py`
+
+### Summary
+Replaced formatted-address string parsing with direct Google Places
+`address_components` extraction for `Street`, `City`, `State`, and `ZIP`.
+
+### Behavior
+- `get_place_details()` now requests `address_components`.
+- Discovered prospects now carry the raw Google `address_components` array.
+- `main.py` extracts:
+  - `street_number` + `route` → `Street`
+  - `locality` → `City`
+  - `administrative_area_level_1.short_name` → `State`
+  - `postal_code` → `ZIP`
+- Removed the redundant `pipeline/address.py` formatted-address parser.
+- Updated README and tests to reflect API-component-based address extraction.
+- Refreshed `config/PROSPECTS_SCHEMA.json` from the live sheet. The live sheet
+  currently places `Street`, `City`, `State`, and `ZIP` directly after
+  `Address`, while `Email` is column 24; dynamic header mapping writes to the
+  correct cells.
+
+### Verification
+- `python3 -m unittest tests/test_dynamic_schema.py`
+- `python3 -m py_compile main.py google_places.py google_sheets.py tests/test_dynamic_schema.py pipeline/__init__.py`
+- Live header check confirmed `Street`, `City`, `State`, and `ZIP` exist in the
+  Google Sheet at columns 5-8.
+- `python3 main.py --zip 11385 --radius 5` completed successfully, found 359
+  businesses, skipped 325 duplicates, and appended 34 new prospects.
+- Live spot-check of the last five appended rows confirmed populated address
+  components:
+  - PureGym Gates Avenue → `1002 Gates Ave`, `Brooklyn`, `NY`, `11221`
+  - Vibe Fitness BQE → `26-50 Brooklyn Queens Expy W`, `Woodside`, `NY`, `11377`
+  - Liberty Dental → `127-06 Liberty Ave`, `South Richmond Hill`, `NY`, `11419`
+  - Atlas Park Dental → `80-28 Cooper Ave #207`, `Glendale`, `NY`, `11385`
+  - New Image Dental → `3-41 St Nicholas Ave #3`, `Ridgewood`, `NY`, `11385`
+- The live sheet still reports existing schema drift: `Last Contact Date` is
+  missing.
+
+---
+
 ## [2026-06-25 16:16 EDT] — feat: add scraper contact extraction toggles
 
 **Files Modified:** `main.py`, `README.md`, `tests/test_dynamic_schema.py`, `CHANGELOG.md`

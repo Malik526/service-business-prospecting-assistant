@@ -133,7 +133,7 @@ class GooglePlacesClient:
             params={
                 "place_id": place_id,
                 "fields": (
-                    "place_id,name,formatted_address,formatted_phone_number,"
+                    "place_id,name,formatted_address,address_components,formatted_phone_number,"
                     "website,rating,user_ratings_total,url,business_status,reviews"
                 ),
                 "key": self.api_key,
@@ -244,6 +244,7 @@ class GooglePlacesClient:
                         "business_name": details.get("name") or item.get("name", ""),
                         "category": category["name"],
                         "address": details.get("formatted_address") or item.get("formatted_address", ""),
+                        "address_components": details.get("address_components", []),
                         "phone": details.get("formatted_phone_number", ""),
                         "website": details.get("website", ""),
                         "google_maps_url": details.get("url", ""),

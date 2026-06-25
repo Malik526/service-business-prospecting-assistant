@@ -40,10 +40,10 @@ This MVP researches and organizes prospects only. It does not send outreach, gen
 | Search Radius (mi) | Search radius used for the prospecting run |
 | Instagram URL | Instagram URL extracted from the business website, when found |
 | Email | Email address extracted from the business website, when found |
-| Street | Street address parsed from the full Google Places address |
-| City | City parsed from the full Google Places address |
-| State | Two-letter state parsed from the full Google Places address |
-| ZIP | Five-digit ZIP code parsed from the full Google Places address |
+| Street | Street address extracted from Google Places address components |
+| City | City extracted from Google Places address components |
+| State | Two-letter state extracted from Google Places address components |
+| ZIP | Five-digit ZIP code extracted from Google Places address components |
 
 ---
 

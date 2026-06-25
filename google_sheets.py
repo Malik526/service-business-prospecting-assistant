@@ -61,10 +61,10 @@ SHEET_COLUMNS = [
     "Search Radius (mi)",     # Column S — radius used in the discovery run
     "Instagram URL",          # Column T — extracted from business website (auto-populated)
     "Email",                  # Column U — extracted from business website (auto-populated)
-    "Street",                 # Column V — parsed street address from Address
-    "City",                   # Column W — parsed city from Address
-    "State",                  # Column X — parsed state from Address
-    "ZIP",                    # Column Y — parsed ZIP code from Address
+    "Street",                 # Column V — street from Google address_components
+    "City",                   # Column W — city from Google address_components
+    "State",                  # Column X — state from Google address_components
+    "ZIP",                    # Column Y — ZIP from Google address_components
 ]
 
 ADDRESS_COMPONENT_COLUMNS = ["Street", "City", "State", "ZIP"]
@@ -221,7 +221,7 @@ class GoogleSheetsClient:
         return headers
 
     def _ensure_address_component_headers(self, headers: list[str]) -> list[str]:
-        """Append required parsed address headers when an existing sheet lacks them."""
+        """Append required address component headers when an existing sheet lacks them."""
         missing_headers = [
             header for header in ADDRESS_COMPONENT_COLUMNS if header not in headers
         ]
@@ -239,7 +239,7 @@ class GoogleSheetsClient:
             body={"values": [missing_headers]},
         ).execute()
         logger.info(
-            "Added parsed address header column(s): %s.",
+            "Added address component header column(s): %s.",
             ", ".join(missing_headers),
         )
         return updated_headers

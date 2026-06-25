@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import unittest
 from argparse import Namespace
+from unittest.mock import patch
 
 from backfill_emails import apply_checkpoint_filter, build_enrichment_queue
 from categories import filter_target_categories
+from google_places import GooglePlacesClient
 from google_sheets import (
     ADDRESS_COMPONENT_COLUMNS,
     GoogleSheetsClient,
@@ -19,8 +21,7 @@ from google_sheets import (
     column_index_to_letter,
     prospect_to_sheet_row,
 )
-from main import selected_extractors
-from pipeline.address import parse_address
+from main import extract_address_components, selected_extractors
 
 
 class DynamicSchemaTests(unittest.TestCase):
@@ -226,7 +227,7 @@ class DynamicSchemaTests(unittest.TestCase):
         self.assertEqual(schema.columns["ZIP"], 24)
 
     def test_prospect_row_includes_parsed_address_fields(self) -> None:
-        """Serialize parsed address components into the default schema."""
+        """Serialize API address components into the default schema."""
         schema = build_schema(SHEET_COLUMNS)
         row = prospect_to_sheet_row(
             {
@@ -244,10 +245,38 @@ class DynamicSchemaTests(unittest.TestCase):
         self.assertEqual(row[schema.columns["State"]], "NY")
         self.assertEqual(row[schema.columns["ZIP"]], "11385")
 
-    def test_parse_address_extracts_google_places_components(self) -> None:
-        """Parse the standard Google Places address format into components."""
+    def test_extract_address_components_uses_google_places_components(self) -> None:
+        """Extract sheet address fields from Google Places component types."""
         self.assertEqual(
-            parse_address("6079 Myrtle Ave, Ridgewood, NY 11385, USA"),
+            extract_address_components(
+                [
+                    {
+                        "long_name": "6079",
+                        "short_name": "6079",
+                        "types": ["street_number"],
+                    },
+                    {
+                        "long_name": "Myrtle Ave",
+                        "short_name": "Myrtle Ave",
+                        "types": ["route"],
+                    },
+                    {
+                        "long_name": "Ridgewood",
+                        "short_name": "Ridgewood",
+                        "types": ["locality"],
+                    },
+                    {
+                        "long_name": "New York",
+                        "short_name": "NY",
+                        "types": ["administrative_area_level_1", "political"],
+                    },
+                    {
+                        "long_name": "11385",
+                        "short_name": "11385",
+                        "types": ["postal_code"],
+                    },
+                ]
+            ),
             {
                 "street": "6079 Myrtle Ave",
                 "city": "Ridgewood",
@@ -256,16 +285,40 @@ class DynamicSchemaTests(unittest.TestCase):
             },
         )
 
-    def test_parse_address_returns_empty_parts_on_failure(self) -> None:
-        """Return empty address parts instead of raising on invalid input."""
-        with self.assertLogs("pipeline.address", level="WARNING") as captured_logs:
-            result = parse_address("Ridgewood, NY")
+    def test_extract_address_components_returns_empty_parts_when_missing(self) -> None:
+        """Return empty address parts when Google omits component data."""
+        result = extract_address_components([])
 
         self.assertEqual(result, {"street": "", "city": "", "state": "", "zip": ""})
-        self.assertIn("Could not parse address 'Ridgewood, NY'", captured_logs.output[0])
+
+    def test_place_details_requests_address_components(self) -> None:
+        """Request Google Places address_components in Place Details fields."""
+        captured_params = {}
+
+        class FakeResponse:
+            """Minimal response object for Place Details request assertions."""
+
+            def raise_for_status(self) -> None:
+                """Simulate a successful HTTP response."""
+                return None
+
+            def json(self) -> dict[str, object]:
+                """Return a minimal OK Place Details payload."""
+                return {"status": "OK", "result": {"address_components": []}}
+
+        def fake_get(url: str, params: dict[str, str], timeout: int) -> FakeResponse:
+            """Capture request params and return a fake Places response."""
+            captured_params.update(params)
+            return FakeResponse()
+
+        client = GooglePlacesClient(api_key="test-key")
+        with patch("google_places.requests.get", side_effect=fake_get):
+            client.get_place_details("place-123")
+
+        self.assertIn("address_components", captured_params["fields"])
 
     def test_address_headers_are_appended_to_existing_sheets(self) -> None:
-        """Append parsed address headers without changing existing header order."""
+        """Append address component headers without changing existing header order."""
         client = object.__new__(GoogleSheetsClient)
         client.sheet_name = "PROSPECTS"
         update_calls = []
