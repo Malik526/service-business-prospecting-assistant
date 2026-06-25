@@ -15,6 +15,8 @@ from categories import filter_target_categories
 from google_places import GooglePlacesClient
 from google_sheets import (
     ADDRESS_COMPONENT_COLUMNS,
+    DATE_ADDED_COLUMN,
+    DATE_ADDED_COLUMN_INDEX,
     GoogleSheetsClient,
     SHEET_COLUMNS,
     build_schema,
@@ -220,11 +222,28 @@ class DynamicSchemaTests(unittest.TestCase):
         schema = build_schema(SHEET_COLUMNS)
         self.assertEqual(len(schema.headers), len(schema.columns))
         self.assertEqual(schema.columns["Place ID"], 0)
-        self.assertEqual(schema.columns["Email"], 20)
-        self.assertEqual(schema.columns["Street"], 21)
-        self.assertEqual(schema.columns["City"], 22)
-        self.assertEqual(schema.columns["State"], 23)
-        self.assertEqual(schema.columns["ZIP"], 24)
+        self.assertEqual(schema.columns["Date Added"], 1)
+        self.assertEqual(schema.columns["Email"], 21)
+        self.assertEqual(schema.columns["Street"], 22)
+        self.assertEqual(schema.columns["City"], 23)
+        self.assertEqual(schema.columns["State"], 24)
+        self.assertEqual(schema.columns["ZIP"], 25)
+
+    def test_prospect_row_includes_date_added(self) -> None:
+        """Serialize Date Added into column B of the default schema."""
+        schema = build_schema(SHEET_COLUMNS)
+        row = prospect_to_sheet_row(
+            {
+                "place_id": "abc123",
+                "date_added": "2026-06-25",
+                "business_name": "Ridge Electric",
+            },
+            schema,
+        )
+
+        self.assertEqual(row[0], "abc123")
+        self.assertEqual(row[1], "2026-06-25")
+        self.assertEqual(row[2], "Ridge Electric")
 
     def test_prospect_row_includes_parsed_address_fields(self) -> None:
         """Serialize API address components into the default schema."""
@@ -358,6 +377,65 @@ class DynamicSchemaTests(unittest.TestCase):
         self.assertEqual(updated_headers, headers + ADDRESS_COMPONENT_COLUMNS)
         self.assertEqual(update_calls[0]["range"], "PROSPECTS!D1:G1")
         self.assertEqual(update_calls[0]["body"], {"values": [ADDRESS_COMPONENT_COLUMNS]})
+
+    def test_date_added_header_is_inserted_at_column_b(self) -> None:
+        """Insert Date Added at column B without replacing existing headers."""
+        client = object.__new__(GoogleSheetsClient)
+        client.sheet_name = "PROSPECTS"
+        client.sheet_id = "sheet-123"
+        batch_calls = []
+        value_updates = []
+
+        class FakeValues:
+            """Minimal fake values service for Date Added header assertions."""
+
+            def update(self, **kwargs: object) -> "FakeValues":
+                """Record value update calls and return an executable object."""
+                value_updates.append(kwargs)
+                return self
+
+            def execute(self) -> dict[str, object]:
+                """Return a fake successful values API response."""
+                return {}
+
+        class FakeSpreadsheets:
+            """Minimal fake spreadsheets service for column insertion assertions."""
+
+            def batchUpdate(self, **kwargs: object) -> "FakeSpreadsheets":
+                """Record batch update calls and return an executable object."""
+                batch_calls.append(kwargs)
+                return self
+
+            def values(self) -> FakeValues:
+                """Return fake values operations."""
+                return FakeValues()
+
+            def execute(self) -> dict[str, object]:
+                """Return fake spreadsheet metadata or update response."""
+                return {}
+
+        class FakeService:
+            """Minimal fake Sheets service for tests."""
+
+            def spreadsheets(self) -> FakeSpreadsheets:
+                """Return fake spreadsheet operations."""
+                return FakeSpreadsheets()
+
+        client.service = FakeService()
+        client._get_sheet_gid = lambda: 123
+        headers = ["Place ID", "Business Name", "Category"]
+
+        updated_headers = client._ensure_date_added_header(headers)
+
+        self.assertEqual(
+            updated_headers,
+            ["Place ID", DATE_ADDED_COLUMN, "Business Name", "Category"],
+        )
+        insert_range = batch_calls[0]["body"]["requests"][0]["insertDimension"]["range"]
+        self.assertEqual(insert_range["startIndex"], DATE_ADDED_COLUMN_INDEX)
+        self.assertEqual(insert_range["endIndex"], DATE_ADDED_COLUMN_INDEX + 1)
+        self.assertEqual(value_updates[0]["range"], "PROSPECTS!B1")
+        self.assertEqual(value_updates[0]["body"], {"values": [[DATE_ADDED_COLUMN]]})
 
     def test_existing_place_ids_use_mapped_column(self) -> None:
         """Read Place IDs from the live mapped column rather than column A."""

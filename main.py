@@ -25,6 +25,7 @@ import argparse
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from typing import Any
 
 from categories import filter_target_categories
@@ -315,6 +316,8 @@ def main() -> None:
     # Deduplicate, score, and collect new records.
     new_prospects = []
     duplicate_count = 0
+    date_added = datetime.today().strftime("%Y-%m-%d")
+    print(f"Adding date_added field to prospects: {date_added}")
     for prospect in prospects:
         if is_duplicate(prospect, dedupe_index):
             duplicate_count += 1
@@ -322,6 +325,7 @@ def main() -> None:
 
         # Tag each prospect with the run parameters for traceability.
         # Allows filtering and grouping by ZIP code and radius in the sheet.
+        prospect["date_added"] = date_added
         prospect["search_zip"] = args.zip_code
         prospect["search_radius"] = args.radius
 

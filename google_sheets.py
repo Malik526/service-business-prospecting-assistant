@@ -40,7 +40,8 @@ SCHEMA_CACHE_PATH = (
 # Ordered list of column headers. The order here defines the column layout in
 # a new empty Google Sheet. Existing sheets may be rearranged.
 SHEET_COLUMNS = [
-    "Place ID",
+    "Place ID",               # Column A — Google Places unique identifier
+    "Date Added",             # Column B — ISO date when prospect was appended
     "Business Name",
     "Category",
     "Address",
@@ -57,17 +58,19 @@ SHEET_COLUMNS = [
     "Last Contact Date",
     "Last Outcome",
     "Notes",
-    "Search ZIP Code",        # Column R — ZIP used in the discovery run
-    "Search Radius (mi)",     # Column S — radius used in the discovery run
-    "Instagram URL",          # Column T — extracted from business website (auto-populated)
-    "Email",                  # Column U — extracted from business website (auto-populated)
-    "Street",                 # Column V — street from Google address_components
-    "City",                   # Column W — city from Google address_components
-    "State",                  # Column X — state from Google address_components
-    "ZIP",                    # Column Y — ZIP from Google address_components
+    "Search ZIP Code",
+    "Search Radius (mi)",
+    "Instagram URL",
+    "Email",
+    "Street",                 # Street from Google address_components
+    "City",                   # City from Google address_components
+    "State",                  # State from Google address_components
+    "ZIP",                    # ZIP from Google address_components
 ]
 
 ADDRESS_COMPONENT_COLUMNS = ["Street", "City", "State", "ZIP"]
+DATE_ADDED_COLUMN = "Date Added"
+DATE_ADDED_COLUMN_INDEX = 1
 
 # Allowed values for the Status dropdown. Status now represents prospect
 # qualification only; call outcomes live in the Last Outcome column.
@@ -96,6 +99,7 @@ LAST_OUTCOME_OPTIONS = [
 
 PROSPECT_FIELD_TO_COLUMN = {
     "place_id": "Place ID",
+    "date_added": "Date Added",
     "business_name": "Business Name",
     "category": "Category",
     "address": "Address",
@@ -183,6 +187,7 @@ class GoogleSheetsClient:
             ).execute()
             logger.info("Created default PROSPECTS header row.")
 
+        headers = self._ensure_date_added_header(headers)
         headers = self._ensure_address_component_headers(headers)
         schema = build_schema(headers)
         missing_columns = [
@@ -242,6 +247,39 @@ class GoogleSheetsClient:
             "Added address component header column(s): %s.",
             ", ".join(missing_headers),
         )
+        return updated_headers
+
+    def _ensure_date_added_header(self, headers: list[str]) -> list[str]:
+        """Ensure the Date Added header exists at column B without overwriting data."""
+        if DATE_ADDED_COLUMN in headers:
+            return headers
+
+        self.service.spreadsheets().batchUpdate(
+            spreadsheetId=self.sheet_id,
+            body={
+                "requests": [
+                    {
+                        "insertDimension": {
+                            "range": {
+                                "sheetId": self._get_sheet_gid(),
+                                "dimension": "COLUMNS",
+                                "startIndex": DATE_ADDED_COLUMN_INDEX,
+                                "endIndex": DATE_ADDED_COLUMN_INDEX + 1,
+                            },
+                            "inheritFromBefore": False,
+                        }
+                    }
+                ]
+            },
+        ).execute()
+        self.service.spreadsheets().values().update(
+            spreadsheetId=self.sheet_id,
+            range=f"{self.sheet_name}!B1",
+            valueInputOption="RAW",
+            body={"values": [[DATE_ADDED_COLUMN]]},
+        ).execute()
+        updated_headers = headers[:DATE_ADDED_COLUMN_INDEX] + [DATE_ADDED_COLUMN] + headers[DATE_ADDED_COLUMN_INDEX:]
+        logger.info("Inserted Date Added header at column B.")
         return updated_headers
 
     def get_existing_records(self) -> list[dict[str, Any]]:

@@ -20,6 +20,7 @@ This MVP researches and organizes prospects only. It does not send outreach, gen
 | Column | Description |
 |---|---|
 | Place ID | Google's unique identifier for the business location |
+| Date Added | ISO date when the prospect was appended to the sheet |
 | Business Name | Name from Google Places |
 | Category | Target category (e.g., dentists, HVAC, caterers) |
 | Address | Formatted address from Google Places |

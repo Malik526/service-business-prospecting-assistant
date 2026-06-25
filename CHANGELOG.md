@@ -2,6 +2,44 @@
 
 ---
 
+## [2026-06-25 17:04 EDT] — feat: auto-populate Date Added for new prospects
+
+**Files Modified:** `google_sheets.py`, `main.py`, `README.md`, `tests/test_dynamic_schema.py`, `config/PROSPECTS_SCHEMA.json`, `CHANGELOG.md`
+
+### Summary
+Reintroduced `Date Added` as a first-class prospect field and now stamps new
+prospects with the run date before appending them to the Google Sheet.
+
+### Behavior
+- Added `Date Added` to the canonical `SHEET_COLUMNS` layout at column B.
+- Added `date_added` to the dynamic prospect field-to-column map.
+- Added an existing-sheet guard that inserts a missing `Date Added` column at B
+  without overwriting existing cells.
+- `main.py` now prints `Adding date_added field to prospects: YYYY-MM-DD` and
+  writes that same ISO date to each accepted new prospect.
+- Confirmed there is no `_LAST_COL` variable in the current dynamic schema
+  implementation; append ranges are calculated from live headers.
+
+### Verification
+- `python3 -m unittest tests/test_dynamic_schema.py`
+- `python3 -m py_compile main.py google_sheets.py tests/test_dynamic_schema.py`
+- Live header check confirmed `Date Added` exists in column B.
+- `python3 main.py --zip 11375 --radius 5` completed successfully, found 354
+  businesses, skipped 325 duplicates, and appended 29 new prospects.
+- Live sheet search found 29 rows with `Date Added = 2026-06-25`.
+- Sample verified rows:
+  - Jamaica 26 Dentistry → `2026-06-25`
+  - Metropolitan Smiles → `2026-06-25`
+  - Allure Dental → `2026-06-25`
+  - A & A Events → `2026-06-25`
+  - Campbell Events → `2026-06-25`
+- Existing rows were not overwritten; 1,423 prior rows still have empty
+  `Date Added` cells, while 17 prior rows already had non-empty dates.
+- The live sheet still reports existing schema drift: `Last Contact Date` is
+  missing.
+
+---
+
 ## [2026-06-25 16:29 EDT] — fix: use Google address components for prospect addresses
 
 **Files Modified:** `google_places.py`, `main.py`, `google_sheets.py`, `pipeline/__init__.py`, `README.md`, `tests/test_dynamic_schema.py`, `config/PROSPECTS_SCHEMA.json`, `CHANGELOG.md`
