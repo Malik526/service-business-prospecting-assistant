@@ -1,4 +1,4 @@
-"""Target service business categories for prospect discovery.
+"""Target service business categories and filtering helpers for prospect discovery.
 
 Each category defines:
   - name:       Human-readable label stored in the Google Sheet.
@@ -57,7 +57,6 @@ specifically designed for outreach to businesses that can benefit from
 digital growth and CRM-adjacent services.
 """
 
-# fmt: off
 TARGET_CATEGORIES = [
     {
         "name": "catering",
@@ -168,4 +167,66 @@ TARGET_CATEGORIES = [
         "crm_fit": True,       # Inquiry tracking, vendor coordination, and client follow-up
     },
 ]
-# fmt: on
+
+
+def normalize_category_key(value: str) -> str:
+    """Normalize category names, queries, and CLI tokens for loose matching."""
+    return "".join(character for character in value.lower() if character.isalnum())
+
+
+def _category_lookup() -> dict[str, dict]:
+    """Build a lookup that accepts canonical names, queries, and singular forms."""
+    lookup = {}
+
+    for category in TARGET_CATEGORIES:
+        keys = {
+            normalize_category_key(category["name"]),
+            normalize_category_key(category["query"]),
+        }
+
+        for key in list(keys):
+            if key.endswith("ies"):
+                keys.add(f"{key[:-3]}y")
+            if key.endswith("s"):
+                keys.add(key[:-1])
+
+        for key in keys:
+            lookup.setdefault(key, category)
+
+    return lookup
+
+
+def filter_target_categories(category_names: str | None) -> list[dict]:
+    """Return target categories matching a comma-separated CLI category list."""
+    if not category_names:
+        return TARGET_CATEGORIES
+
+    requested_names = [name.strip() for name in category_names.split(",") if name.strip()]
+    if not requested_names:
+        raise ValueError("Provide at least one category after --categories.")
+
+    lookup = _category_lookup()
+    selected_categories = []
+    seen_names = set()
+    unknown_names = []
+
+    for requested_name in requested_names:
+        category = lookup.get(normalize_category_key(requested_name))
+        if not category:
+            unknown_names.append(requested_name)
+            continue
+
+        if category["name"] in seen_names:
+            continue
+
+        selected_categories.append(category)
+        seen_names.add(category["name"])
+
+    if unknown_names:
+        available_names = ", ".join(category["name"] for category in TARGET_CATEGORIES)
+        unknown_display = ", ".join(unknown_names)
+        raise ValueError(
+            f"Unknown categories: {unknown_display}. Available categories: {available_names}."
+        )
+
+    return selected_categories

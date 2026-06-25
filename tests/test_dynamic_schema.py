@@ -9,6 +9,7 @@ from __future__ import annotations
 import unittest
 
 from backfill_emails import build_enrichment_queue
+from categories import filter_target_categories
 from google_sheets import (
     ADDRESS_COMPONENT_COLUMNS,
     GoogleSheetsClient,
@@ -22,6 +23,24 @@ from pipeline.address import parse_address
 
 class DynamicSchemaTests(unittest.TestCase):
     """Validate dynamic schema behavior without Google Sheets API calls."""
+
+    def test_filter_target_categories_accepts_singular_cli_names(self) -> None:
+        """Resolve comma-separated category shorthands into target categories."""
+        categories = filter_target_categories("electrician,hvac,plumber")
+
+        self.assertEqual(
+            [category["name"] for category in categories],
+            ["electricians", "HVAC", "plumbers"],
+        )
+
+    def test_filter_target_categories_defaults_to_all_categories(self) -> None:
+        """Return the full category list when no CLI filter is supplied."""
+        self.assertGreater(len(filter_target_categories(None)), 3)
+
+    def test_filter_target_categories_rejects_unknown_names(self) -> None:
+        """Raise a clear error instead of silently ignoring unknown filters."""
+        with self.assertRaisesRegex(ValueError, "Unknown categories: astrologer"):
+            filter_target_categories("plumber,astrologer")
 
     def test_column_index_to_letter_supports_beyond_z(self) -> None:
         """Convert zero-based indexes into Sheets letters past column Z."""

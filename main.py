@@ -1,11 +1,11 @@
 """CLI entrypoint and orchestration layer for the service business prospecting tool.
 
 This module connects all components together:
-  1. Parse CLI arguments (ZIP code, radius).
+  1. Parse CLI arguments (ZIP code, radius, optional categories).
   2. Load and validate environment configuration.
   3. Initialize Google Places and Google Sheets clients.
   4. Fetch existing records from the sheet for deduplication.
-  5. Search Google Places for businesses across all target categories.
+  5. Search Google Places for businesses across selected target categories.
   6. Deduplicate results against existing records (and within the current run).
   7. Score and enrich each new prospect.
   8. Append new prospects to the Google Sheet.
@@ -27,7 +27,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from categories import TARGET_CATEGORIES
+from categories import filter_target_categories
 
 logger = logging.getLogger(__name__)
 from config import load_config, validate_config
@@ -49,6 +49,13 @@ def parse_args() -> argparse.Namespace:
         required=True,
         type=float,
         help="Search radius in miles. Example: 10, 20, 30.",
+    )
+    parser.add_argument(
+        "--categories",
+        help=(
+            "Optional comma-separated category filter. "
+            "Example: electrician,hvac,plumber. Defaults to all categories."
+        ),
     )
     return parser.parse_args()
 
@@ -225,6 +232,10 @@ def main() -> None:
     args = parse_args()
     config = load_config()
     validate_config(config)
+    try:
+        selected_categories = filter_target_categories(args.categories)
+    except ValueError as exc:
+        raise SystemExit(f"Error: {exc}") from exc
 
     places_client = GooglePlacesClient(
         api_key=config.google_places_api_key,
@@ -239,11 +250,11 @@ def main() -> None:
     # Load existing sheet records to build the dedupe index.
     existing_records = sheets_client.get_existing_records()
     dedupe_index = build_dedupe_index(existing_records)
-    category_lookup = {category["name"]: category for category in TARGET_CATEGORIES}
+    category_lookup = {category["name"]: category for category in selected_categories}
 
-    # Discover raw prospects from Google Places across all categories.
+    # Discover raw prospects from Google Places across the selected categories.
     prospects = places_client.discover_prospects(
-        categories=TARGET_CATEGORIES,
+        categories=selected_categories,
         zip_code=args.zip_code,
         radius_miles=args.radius,
     )

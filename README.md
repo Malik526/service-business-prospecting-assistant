@@ -390,6 +390,16 @@ Deduplication runs against both existing Google Sheet records and all prospects 
 
 Edit `categories.py`.
 
+Use `--categories` to limit a run to specific business types:
+
+```bash
+python3 main.py --zip 11375 --radius 5 --categories electrician,hvac,plumber
+```
+
+The filter accepts comma-separated category names, Google Places query names,
+singular forms, and case/spacing variants. If omitted, the scraper searches all
+categories in `TARGET_CATEGORIES`.
+
 Each category has:
 
 | Key | Type | Description |

@@ -2,6 +2,29 @@
 
 ---
 
+## [2026-06-25 15:53 EDT] — feat: add category-filtered prospect scraping
+
+**Files Modified:** `main.py`, `categories.py`, `README.md`, `tests/test_dynamic_schema.py`, `CHANGELOG.md`
+
+### Summary
+Added a `--categories` CLI parameter so prospecting runs can target only
+specific business types instead of scraping every configured category.
+
+### Behavior
+- Added comma-separated category filtering such as
+  `--categories electrician,hvac,plumber`.
+- Category matching now accepts canonical names, Google Places query names,
+  singular forms, and case/spacing variants.
+- Unknown category filters fail fast with a clear list of available categories.
+- `main.py` now passes only the selected categories to Google Places discovery,
+  reducing API searches and preventing unrelated categories from being appended.
+
+### Verification
+- `python3 -m unittest tests/test_dynamic_schema.py`
+- `python3 -m py_compile main.py google_places.py categories.py tests/test_dynamic_schema.py`
+
+---
+
 ## [2026-06-23 23:06 EDT] — feat: add parsed address columns to prospecting pipeline
 
 **Files Modified:** `google_sheets.py`, `main.py`, `pipeline/__init__.py`, `README.md`, `tests/test_dynamic_schema.py`, `CHANGELOG.md`
