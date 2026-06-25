@@ -57,7 +57,27 @@ def parse_args() -> argparse.Namespace:
             "Example: electrician,hvac,plumber. Defaults to all categories."
         ),
     )
+    parser.add_argument(
+        "--skip-email",
+        action="store_true",
+        help="Do not extract Email values from new prospect websites.",
+    )
+    parser.add_argument(
+        "--skip-instagram",
+        action="store_true",
+        help="Do not extract Instagram URL values from new prospect websites.",
+    )
     return parser.parse_args()
+
+
+def selected_extractors(args: argparse.Namespace) -> list[str]:
+    """Return contact extractors enabled by CLI flags."""
+    extractors = []
+    if not args.skip_email:
+        extractors.append("email")
+    if not args.skip_instagram:
+        extractors.append("instagram_url")
+    return extractors
 
 
 def enrich_with_score(prospect: dict[str, Any], category_lookup: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -83,6 +103,7 @@ def print_summary(
     found_count: int,
     duplicate_count: int,
     added: list[dict[str, Any]],
+    enabled_extractors: list[str],
     appended_count: int | None = None,
     append_skipped_duplicates: int = 0,
 ) -> None:
@@ -142,6 +163,8 @@ def print_summary(
     print(f"\n{sep}")
     print("  Contact Data Extraction")
     print(sep)
+    print(f"  Email extractor:     {'enabled' if 'email' in enabled_extractors else 'disabled'}")
+    print(f"  Instagram extractor: {'enabled' if 'instagram_url' in enabled_extractors else 'disabled'}")
     print(f"  Emails found:    {emails_found:>4} / {sites_total} prospects with websites")
     print(f"  Instagram URLs:  {instagram_found:>4} / {sites_total} prospects with websites")
 
@@ -232,6 +255,7 @@ def main() -> None:
     args = parse_args()
     config = load_config()
     validate_config(config)
+    enabled_extractors = selected_extractors(args)
     try:
         selected_categories = filter_target_categories(args.categories)
     except ValueError as exc:
@@ -287,11 +311,11 @@ def main() -> None:
         add_to_index(enriched, dedupe_index)
 
     # --- Parallel contact-data extraction ---
-    # Email and Instagram are fetched concurrently with a hard 3-minute ceiling
+    # Enabled extractors are fetched concurrently with a hard 3-minute ceiling
     # so the pipeline never hangs regardless of site responsiveness.
     prospects_with_sites = [p for p in new_prospects if p.get("website")]
 
-    if prospects_with_sites:
+    if prospects_with_sites and enabled_extractors:
         logger.info(
             "Extracting contact data for %d prospects...",
             len(prospects_with_sites),
@@ -301,12 +325,14 @@ def main() -> None:
         start_time = time.time()
 
         def enrich_prospect(prospect: dict[str, Any]) -> dict[str, Any]:
-            """Fetch email and Instagram URL for a single prospect in parallel."""
+            """Fetch enabled contact fields for a single prospect."""
             from pipeline.social import extract_email, extract_instagram_url
 
             website = prospect.get("website", "")
-            prospect["email"] = extract_email(website)
-            prospect["instagram_url"] = extract_instagram_url(website)
+            if "email" in enabled_extractors:
+                prospect["email"] = extract_email(website)
+            if "instagram_url" in enabled_extractors:
+                prospect["instagram_url"] = extract_instagram_url(website)
             return prospect
 
         with ThreadPoolExecutor(max_workers=10) as executor:
@@ -331,6 +357,8 @@ def main() -> None:
             emails_found,
             instagram_found,
         )
+    elif prospects_with_sites:
+        logger.info("Contact extraction skipped by CLI flags.")
 
     # Ensure every prospect has both keys so sheet row serialization is safe.
     for p in new_prospects:
@@ -346,6 +374,7 @@ def main() -> None:
         len(prospects),
         duplicate_count,
         new_prospects,
+        enabled_extractors=enabled_extractors,
         appended_count=append_result["appended"],
         append_skipped_duplicates=append_result["skipped_duplicates"],
     )

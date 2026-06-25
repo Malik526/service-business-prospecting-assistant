@@ -2,6 +2,30 @@
 
 ---
 
+## [2026-06-25 16:16 EDT] — feat: add scraper contact extraction toggles
+
+**Files Modified:** `main.py`, `README.md`, `tests/test_dynamic_schema.py`, `CHANGELOG.md`
+
+### Summary
+Added CLI flags to control whether the main prospect scraping pipeline extracts
+emails, Instagram URLs, both, or neither from new prospect websites.
+
+### Behavior
+- Added `--skip-email` and `--skip-instagram` to `main.py`.
+- Default scraping still attempts both extractors.
+- Email-only runs can use `--skip-instagram`.
+- Instagram-only runs can use `--skip-email`.
+- Google-data-only runs can use both flags to skip the contact extraction
+  executor entirely.
+- The summary now prints whether each extractor was enabled or disabled.
+
+### Verification
+- `python3 -m unittest tests/test_dynamic_schema.py`
+- `python3 -m py_compile main.py tests/test_dynamic_schema.py`
+- `python3 -B main.py --help`
+
+---
+
 ## [2026-06-25 16:09 EDT] — feat: add contact backfill toggles and Instagram extraction
 
 **Files Modified:** `backfill_emails.py`, `pipeline/social.py`, `README.md`, `tests/test_dynamic_schema.py`, `CHANGELOG.md`

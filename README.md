@@ -352,11 +352,26 @@ python main.py --zip 11385 --radius 10
 python main.py --zip 11385 --radius 30
 ```
 
+Control contact extraction during scraping:
+
+```bash
+python3 main.py --zip 11375 --radius 5
+python3 main.py --zip 11375 --radius 5 --skip-instagram
+python3 main.py --zip 11375 --radius 5 --skip-email
+python3 main.py --zip 11375 --radius 5 --skip-email --skip-instagram
+```
+
+By default, scraping extracts both email addresses and Instagram URLs from new
+prospect websites. Use `--skip-instagram` for email-focused scrapes,
+`--skip-email` for Instagram-only scrapes, or both flags for the fastest
+Google-data-only run.
+
 After each run, the CLI prints:
 
 - Run parameters (ZIP, radius)
 - Businesses found, duplicates skipped, new records added
 - Website coverage (with / without website)
+- Contact extraction enabled/disabled status
 - Lead score average and range
 - 5 closest businesses by distance
 - 5 most-reviewed businesses

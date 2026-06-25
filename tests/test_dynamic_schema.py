@@ -7,6 +7,7 @@ serialization, and email backfill queue construction.
 from __future__ import annotations
 
 import unittest
+from argparse import Namespace
 
 from backfill_emails import apply_checkpoint_filter, build_enrichment_queue
 from categories import filter_target_categories
@@ -18,6 +19,7 @@ from google_sheets import (
     column_index_to_letter,
     prospect_to_sheet_row,
 )
+from main import selected_extractors
 from pipeline.address import parse_address
 
 
@@ -41,6 +43,18 @@ class DynamicSchemaTests(unittest.TestCase):
         """Raise a clear error instead of silently ignoring unknown filters."""
         with self.assertRaisesRegex(ValueError, "Unknown categories: astrologer"):
             filter_target_categories("plumber,astrologer")
+
+    def test_selected_extractors_defaults_to_email_and_instagram(self) -> None:
+        """Enable both main-pipeline extractors unless they are skipped."""
+        args = Namespace(skip_email=False, skip_instagram=False)
+
+        self.assertEqual(selected_extractors(args), ["email", "instagram_url"])
+
+    def test_selected_extractors_supports_google_data_only(self) -> None:
+        """Disable all contact extraction when both skip flags are present."""
+        args = Namespace(skip_email=True, skip_instagram=True)
+
+        self.assertEqual(selected_extractors(args), [])
 
     def test_column_index_to_letter_supports_beyond_z(self) -> None:
         """Convert zero-based indexes into Sheets letters past column Z."""
