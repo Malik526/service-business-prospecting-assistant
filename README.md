@@ -408,6 +408,9 @@ ZIP list:
 
 The launcher starts all scraper processes before waiting for completion. Final
 sheet writes are serialized by the file-based write lock in `google_sheets.py`.
+When all instances finish, the launcher aggregates each scraper's structured
+stats and prints one final report with total prospects, category breakdown,
+email capture counts/rate, and Instagram capture counts/rate.
 
 After each run, the CLI prints:
 

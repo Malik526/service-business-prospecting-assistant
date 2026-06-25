@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 import sys
 import time
@@ -25,6 +26,8 @@ DEFAULT_CONFIG_FILE = "scrape_config.json"
 DEFAULT_RADIUS = 20
 DEFAULT_CATEGORIES = "electrician,hvac,plumber"
 LAUNCH_DELAY_SECONDS = 1
+REPORT_CATEGORIES = ("electrician", "hvac", "plumber")
+SCRAPING_STATS_PATTERN = re.compile(r"SCRAPING_STATS:(\{.*\})")
 
 
 def configure_logging() -> None:
@@ -89,6 +92,101 @@ def validate_config(config: dict[str, Any]) -> tuple[float, str, list[str]]:
     return normalized_radius, categories, normalized_zips
 
 
+def parse_instance_stats(stderr_output: str) -> dict[str, Any] | None:
+    """Extract SCRAPING_STATS JSON from one scraper instance's stderr."""
+    for line in stderr_output.splitlines():
+        match = SCRAPING_STATS_PATTERN.search(line)
+        if not match:
+            continue
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError:
+            LOGGER.warning("Could not parse scraper stats line: %s", line)
+            return None
+    return None
+
+
+def aggregate_stats(stats_list: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Aggregate scraper instance stats into one launcher-level summary."""
+    if not stats_list:
+        return None
+
+    aggregated: dict[str, Any] = {
+        "total_prospects": 0,
+        "by_category": dict.fromkeys(REPORT_CATEGORIES, 0),
+        "emails_found": 0,
+        "emails_by_category": dict.fromkeys(REPORT_CATEGORIES, 0),
+        "instagrams_found": 0,
+        "instagrams_by_category": dict.fromkeys(REPORT_CATEGORIES, 0),
+    }
+
+    for stats in stats_list:
+        aggregated["total_prospects"] += int(stats.get("total_prospects", 0) or 0)
+        aggregated["emails_found"] += int(stats.get("emails_found", 0) or 0)
+        aggregated["instagrams_found"] += int(stats.get("instagrams_found", 0) or 0)
+
+        for category in REPORT_CATEGORIES:
+            aggregated["by_category"][category] += int(
+                stats.get("by_category", {}).get(category, 0) or 0
+            )
+            aggregated["emails_by_category"][category] += int(
+                stats.get("emails_by_category", {}).get(category, 0) or 0
+            )
+            aggregated["instagrams_by_category"][category] += int(
+                stats.get("instagrams_by_category", {}).get(category, 0) or 0
+            )
+
+    total = aggregated["total_prospects"]
+    aggregated["emails_captured_percent"] = (
+        round(aggregated["emails_found"] / total * 100, 1) if total else 0
+    )
+    aggregated["instagrams_captured_percent"] = (
+        round(aggregated["instagrams_found"] / total * 100, 1) if total else 0
+    )
+    return aggregated
+
+
+def print_final_summary(aggregated_stats: dict[str, Any], zip_codes: list[str]) -> None:
+    """Pretty-print final aggregated stats from all completed instances."""
+    LOGGER.info("")
+    LOGGER.info("=" * 80)
+    LOGGER.info("FINAL SCRAPING SUMMARY - ALL INSTANCES COMPLETE")
+    LOGGER.info("=" * 80)
+    LOGGER.info("")
+    LOGGER.info("TOTAL PROSPECTS APPENDED: %d", aggregated_stats["total_prospects"])
+    LOGGER.info("")
+
+    LOGGER.info("BREAKDOWN BY CATEGORY:")
+    LOGGER.info("  Electricians: %d", aggregated_stats["by_category"]["electrician"])
+    LOGGER.info("  HVAC: %d", aggregated_stats["by_category"]["hvac"])
+    LOGGER.info("  Plumbers: %d", aggregated_stats["by_category"]["plumber"])
+    LOGGER.info("")
+
+    LOGGER.info(
+        "EMAIL ADDRESSES CAPTURED: %d (%.1f%%)",
+        aggregated_stats["emails_found"],
+        aggregated_stats["emails_captured_percent"],
+    )
+    LOGGER.info("  Electricians: %d", aggregated_stats["emails_by_category"]["electrician"])
+    LOGGER.info("  HVAC: %d", aggregated_stats["emails_by_category"]["hvac"])
+    LOGGER.info("  Plumbers: %d", aggregated_stats["emails_by_category"]["plumber"])
+    LOGGER.info("")
+
+    LOGGER.info(
+        "INSTAGRAM URLS CAPTURED: %d (%.1f%%)",
+        aggregated_stats["instagrams_found"],
+        aggregated_stats["instagrams_captured_percent"],
+    )
+    LOGGER.info("  Electricians: %d", aggregated_stats["instagrams_by_category"]["electrician"])
+    LOGGER.info("  HVAC: %d", aggregated_stats["instagrams_by_category"]["hvac"])
+    LOGGER.info("  Plumbers: %d", aggregated_stats["instagrams_by_category"]["plumber"])
+    LOGGER.info("")
+    LOGGER.info("=" * 80)
+    LOGGER.info("")
+    LOGGER.info("Next steps: Check Google Sheet for new rows.")
+    LOGGER.info("Filter by 'Search ZIP Code' in %s", ", ".join(zip_codes))
+
+
 def build_command(zip_code: str, radius: float, categories: str) -> list[str]:
     """Build the command for one scraper process."""
     return [
@@ -130,10 +228,13 @@ def log_startup(radius: float, categories: str, zip_codes: list[str]) -> None:
     LOGGER.info("")
 
 
-def summarize_processes(processes: list[tuple[str, subprocess.Popen[str]]]) -> tuple[int, int]:
-    """Wait for all scraper processes and log their completion status."""
+def summarize_processes(
+    processes: list[tuple[str, subprocess.Popen[str]]],
+) -> tuple[int, int, list[dict[str, Any]]]:
+    """Wait for all scraper processes and collect structured stats."""
     completed = 0
     failed = 0
+    stats_list = []
 
     for zip_code, process in processes:
         stdout, stderr = process.communicate()
@@ -141,6 +242,11 @@ def summarize_processes(processes: list[tuple[str, subprocess.Popen[str]]]) -> t
         if process.returncode == 0:
             LOGGER.info("ZIP %s: Completed successfully", zip_code)
             completed += 1
+            stats = parse_instance_stats(stderr)
+            if stats:
+                stats_list.append(stats)
+            else:
+                LOGGER.warning("ZIP %s: No SCRAPING_STATS line found", zip_code)
             continue
 
         LOGGER.error("ZIP %s: Failed with exit code %s", zip_code, process.returncode)
@@ -150,7 +256,7 @@ def summarize_processes(processes: list[tuple[str, subprocess.Popen[str]]]) -> t
             LOGGER.error("ZIP %s stdout: %s", zip_code, stdout[-1000:])
         failed += 1
 
-    return completed, failed
+    return completed, failed, stats_list
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -172,16 +278,22 @@ def main(argv: list[str] | None = None) -> None:
     LOGGER.info("=" * 70)
     LOGGER.info("")
 
-    completed, failed = summarize_processes(processes)
+    completed, failed, stats_list = summarize_processes(processes)
 
     LOGGER.info("")
-    LOGGER.info("=" * 70)
+    LOGGER.info("=" * 80)
     LOGGER.info("SCRAPING COMPLETE")
-    LOGGER.info("=" * 70)
+    LOGGER.info("=" * 80)
     LOGGER.info("Completed: %d/%d", completed, len(zip_codes))
     if failed:
         LOGGER.info("Failed: %d/%d", failed, len(zip_codes))
-    LOGGER.info("=" * 70)
+    LOGGER.info("=" * 80)
+
+    aggregated = aggregate_stats(stats_list)
+    if aggregated:
+        print_final_summary(aggregated, zip_codes)
+    else:
+        LOGGER.warning("No stats collected from instances.")
 
     if failed:
         raise SystemExit(1)

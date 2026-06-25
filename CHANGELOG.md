@@ -2,6 +2,37 @@
 
 ---
 
+## [2026-06-25 18:51 EDT] — feat: add aggregate reporting to parallel scraper
+
+**Files Modified:** `main.py`, `run_scraper_parallel.py`, `tests/test_parallel_launcher.py`, `README.md`, `CHANGELOG.md`
+
+### Summary
+Added machine-readable per-run stats from `main.py` and aggregate final
+reporting in `run_scraper_parallel.py` after all scraper instances complete.
+
+### Behavior
+- `main.py` now emits a `SCRAPING_STATS:` JSON line to stderr after the normal
+  run summary.
+- Stats include total new prospects, electrician/HVAC/plumber breakdowns,
+  email counts/rates, and Instagram counts/rates.
+- The parallel launcher parses each successful child process's stats, sums the
+  results, recalculates capture percentages, and prints one final all-instances
+  summary.
+- Missing or malformed stats are logged as warnings without hiding the child
+  process completion result.
+- Category reporting normalizes internal plural names such as `electricians`
+  and `plumbers` into the singular report keys expected by the launcher.
+
+### Verification
+- `python3 -m py_compile main.py run_scraper_parallel.py tests/test_parallel_launcher.py`
+- `python3 -m unittest tests/test_parallel_launcher.py tests/test_dynamic_schema.py`
+- `python3 run_scraper_parallel.py --help`
+- Full live parallel scrape was not run in this verification pass because it
+  would perform real Google API calls and append live rows to the production
+  sheet.
+
+---
+
 ## [2026-06-25 17:52 EDT] — feat: add parallel scraper launcher
 
 **Files Added:** `scrape_config.json`, `run_scraper_parallel.py`, `tests/test_parallel_launcher.py`

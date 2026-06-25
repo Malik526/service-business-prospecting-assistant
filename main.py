@@ -22,7 +22,9 @@ Responsibilities deliberately kept out of this module:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -37,6 +39,21 @@ from google_places import GooglePlacesClient
 from google_sheets import GoogleSheetsClient
 from scoring import score_prospect, weighted_reputation_score, why_good_fit
 from utils import safe_float, safe_int
+
+
+REPORT_CATEGORIES = ("electrician", "hvac", "plumber")
+
+
+def reporting_category(category: str) -> str | None:
+    """Normalize internal category names into report-friendly keys."""
+    normalized = category.strip().lower()
+    if normalized in {"electrician", "electricians"}:
+        return "electrician"
+    if normalized == "hvac":
+        return "hvac"
+    if normalized in {"plumber", "plumbers"}:
+        return "plumber"
+    return None
 
 
 def parse_args() -> argparse.Namespace:
@@ -281,6 +298,44 @@ def print_summary(
     print(f"{'=' * 52}\n")
 
 
+def print_scraping_summary(new_prospects: list[dict[str, Any]]) -> None:
+    """Emit machine-readable scraping stats for the parallel launcher."""
+    category_counts = dict.fromkeys(REPORT_CATEGORIES, 0)
+    emails_by_category = dict.fromkeys(REPORT_CATEGORIES, 0)
+    instagrams_by_category = dict.fromkeys(REPORT_CATEGORIES, 0)
+    emails_found = 0
+    instagrams_found = 0
+
+    for prospect in new_prospects:
+        category = reporting_category(str(prospect.get("category", "")))
+        if category:
+            category_counts[category] += 1
+
+        if str(prospect.get("email", "")).strip():
+            emails_found += 1
+            if category:
+                emails_by_category[category] += 1
+
+        if str(prospect.get("instagram_url", "")).strip():
+            instagrams_found += 1
+            if category:
+                instagrams_by_category[category] += 1
+
+    total = len(new_prospects)
+    summary = {
+        "total_prospects": total,
+        "by_category": category_counts,
+        "emails_found": emails_found,
+        "emails_by_category": emails_by_category,
+        "emails_captured_percent": round((emails_found / total * 100), 1) if total else 0,
+        "instagrams_found": instagrams_found,
+        "instagrams_by_category": instagrams_by_category,
+        "instagrams_captured_percent": round((instagrams_found / total * 100), 1) if total else 0,
+    }
+
+    print("SCRAPING_STATS:" + json.dumps(summary, sort_keys=True), file=sys.stderr)
+
+
 def main() -> None:
     args = parse_args()
     config = load_config()
@@ -411,6 +466,7 @@ def main() -> None:
         appended_count=append_result["appended"],
         append_skipped_duplicates=append_result["skipped_duplicates"],
     )
+    print_scraping_summary(new_prospects)
 
 
 if __name__ == "__main__":

@@ -79,6 +79,69 @@ class ParallelLauncherTests(unittest.TestCase):
         self.assertEqual(popen_mock.call_args.kwargs["stdout"], run_scraper_parallel.subprocess.PIPE)
         self.assertEqual(popen_mock.call_args.kwargs["stderr"], run_scraper_parallel.subprocess.PIPE)
 
+    def test_parse_instance_stats_reads_scraping_stats_line(self) -> None:
+        """Parse one machine-readable stats line from child stderr."""
+        stderr = (
+            "some warning\n"
+            'SCRAPING_STATS:{"total_prospects": 3, "emails_found": 1}\n'
+        )
+
+        stats = run_scraper_parallel.parse_instance_stats(stderr)
+
+        self.assertEqual(stats, {"total_prospects": 3, "emails_found": 1})
+
+    def test_parse_instance_stats_returns_none_without_valid_json(self) -> None:
+        """Ignore stderr that has no parseable SCRAPING_STATS payload."""
+        self.assertIsNone(run_scraper_parallel.parse_instance_stats("plain stderr"))
+        self.assertIsNone(run_scraper_parallel.parse_instance_stats("SCRAPING_STATS:{bad json}"))
+
+    def test_aggregate_stats_sums_instances_and_percentages(self) -> None:
+        """Aggregate counts and recalculate capture percentages."""
+        aggregated = run_scraper_parallel.aggregate_stats(
+            [
+                {
+                    "total_prospects": 4,
+                    "by_category": {"electrician": 2, "hvac": 1, "plumber": 1},
+                    "emails_found": 2,
+                    "emails_by_category": {"electrician": 1, "hvac": 1, "plumber": 0},
+                    "instagrams_found": 1,
+                    "instagrams_by_category": {"electrician": 1, "hvac": 0, "plumber": 0},
+                },
+                {
+                    "total_prospects": 6,
+                    "by_category": {"electrician": 1, "hvac": 2, "plumber": 3},
+                    "emails_found": 3,
+                    "emails_by_category": {"electrician": 0, "hvac": 1, "plumber": 2},
+                    "instagrams_found": 2,
+                    "instagrams_by_category": {"electrician": 0, "hvac": 1, "plumber": 1},
+                },
+            ]
+        )
+
+        self.assertEqual(aggregated["total_prospects"], 10)
+        self.assertEqual(aggregated["by_category"], {"electrician": 3, "hvac": 3, "plumber": 4})
+        self.assertEqual(aggregated["emails_found"], 5)
+        self.assertEqual(aggregated["emails_captured_percent"], 50.0)
+        self.assertEqual(aggregated["instagrams_found"], 3)
+        self.assertEqual(aggregated["instagrams_captured_percent"], 30.0)
+
+    def test_summarize_processes_collects_stats(self) -> None:
+        """Collect child-process stats alongside completion counts."""
+        process = MagicMock()
+        process.returncode = 0
+        process.communicate.return_value = (
+            "",
+            'SCRAPING_STATS:{"total_prospects": 2, "emails_found": 1}',
+        )
+
+        completed, failed, stats_list = run_scraper_parallel.summarize_processes(
+            [("11375", process)]
+        )
+
+        self.assertEqual(completed, 1)
+        self.assertEqual(failed, 0)
+        self.assertEqual(stats_list, [{"total_prospects": 2, "emails_found": 1}])
+
     def test_main_launches_all_before_waiting(self) -> None:
         """Launch all ZIPs before summarize waits on process completion."""
         events = []
@@ -88,10 +151,19 @@ class ParallelLauncherTests(unittest.TestCase):
             events.append(("launch", zip_code))
             return MagicMock()
 
-        def fake_summarize(processes: list[tuple[str, MagicMock]]) -> tuple[int, int]:
+        def fake_summarize(processes: list[tuple[str, MagicMock]]) -> tuple[int, int, list[dict]]:
             """Record summarize timing after all launches."""
             events.append(("summarize", ",".join(zip_code for zip_code, _ in processes)))
-            return len(processes), 0
+            return len(processes), 0, [
+                {
+                    "total_prospects": 0,
+                    "by_category": {"electrician": 0, "hvac": 0, "plumber": 0},
+                    "emails_found": 0,
+                    "emails_by_category": {"electrician": 0, "hvac": 0, "plumber": 0},
+                    "instagrams_found": 0,
+                    "instagrams_by_category": {"electrician": 0, "hvac": 0, "plumber": 0},
+                }
+            ]
 
         with patch(
             "run_scraper_parallel.load_config",
@@ -103,7 +175,9 @@ class ParallelLauncherTests(unittest.TestCase):
         ), patch("run_scraper_parallel.launch_scraper", side_effect=fake_launch), patch(
             "run_scraper_parallel.summarize_processes",
             side_effect=fake_summarize,
-        ), patch("run_scraper_parallel.time.sleep") as sleep_mock:
+        ), patch("run_scraper_parallel.print_final_summary") as summary_mock, patch(
+            "run_scraper_parallel.time.sleep"
+        ) as sleep_mock:
             run_scraper_parallel.main([])
 
         self.assertEqual(
@@ -117,6 +191,7 @@ class ParallelLauncherTests(unittest.TestCase):
         )
         self.assertEqual(sleep_mock.call_count, 3)
         sleep_mock.assert_called_with(run_scraper_parallel.LAUNCH_DELAY_SECONDS)
+        summary_mock.assert_called_once()
 
 
 if __name__ == "__main__":
