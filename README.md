@@ -388,6 +388,27 @@ prospect websites. Use `--skip-instagram` for email-focused scrapes,
 `--skip-email` for Instagram-only scrapes, or both flags for the fastest
 Google-data-only run.
 
+Run several ZIP codes in parallel from `scrape_config.json`:
+
+```bash
+python3 run_scraper_parallel.py
+python3 run_scraper_parallel.py --config scrape_config.json
+```
+
+Edit `scrape_config.json` to change the shared radius, shared categories, or
+ZIP list:
+
+```json
+{
+  "default_radius": 20,
+  "default_categories": "electrician,hvac,plumber",
+  "zip_codes": ["08002", "10001", "11375"]
+}
+```
+
+The launcher starts all scraper processes before waiting for completion. Final
+sheet writes are serialized by the file-based write lock in `google_sheets.py`.
+
 After each run, the CLI prints:
 
 - Run parameters (ZIP, radius)

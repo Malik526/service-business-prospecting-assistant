@@ -2,6 +2,44 @@
 
 ---
 
+## [2026-06-25 17:52 EDT] — feat: add parallel scraper launcher
+
+**Files Added:** `scrape_config.json`, `run_scraper_parallel.py`, `tests/test_parallel_launcher.py`
+
+**Files Modified:** `README.md`, `CHANGELOG.md`
+
+### Summary
+Added a simple JSON-driven launcher that starts multiple `main.py` scraper
+instances in parallel using shared radius and category settings.
+
+### Behavior
+- Added `scrape_config.json` with `default_radius`, `default_categories`, and a
+  flat `zip_codes` list.
+- Added executable `run_scraper_parallel.py`.
+- The launcher reads config, validates radius/categories/ZIPs, starts each ZIP
+  with `subprocess.Popen()`, waits until all instances are launched, then
+  summarizes completion by ZIP.
+- Added a 1-second delay between launches to reduce startup pressure.
+- Added `--config` and safe `--help` support.
+- Subprocesses run from the project directory and use the current Python
+  interpreter.
+- Existing `google_sheets.py` file locking protects final sheet appends.
+
+### Verification
+- `python3 -m py_compile run_scraper_parallel.py tests/test_parallel_launcher.py`
+- `python3 -m unittest tests/test_parallel_launcher.py tests/test_dynamic_schema.py`
+- `python3 run_scraper_parallel.py --help`
+- Unit tests verified a mocked 3-ZIP parallel launch path where all scraper
+  processes are launched before waiting for completion.
+- Unit tests verified `subprocess.Popen()` usage, captured stdout/stderr,
+  launch delay calls, config loading, command construction, and config
+  validation.
+- Full live parallel scrape was not completed in this verification pass because
+  it would perform real Google API calls and append live rows to the production
+  sheet.
+
+---
+
 ## [2026-06-25 17:13 EDT] — fix: serialize Google Sheets writes with a file lock
 
 **Files Modified:** `config.py`, `google_sheets.py`, `README.md`, `tests/test_dynamic_schema.py`, `CHANGELOG.md`
