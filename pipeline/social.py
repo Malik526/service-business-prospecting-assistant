@@ -25,6 +25,12 @@ from urllib.parse import urljoin
 
 import requests
 
+from pipeline.email_validation import (
+    is_fake_email,
+    record_email_validation_result,
+    validate_email_list,
+)
+
 logger = logging.getLogger(__name__)
 
 # Realistic browser-like User-Agent to reduce blocks from bot-detection middleware.
@@ -91,45 +97,27 @@ def extract_instagram_url(website_url: str) -> str:
 # Hard limit on individual HTTP requests — never wait longer than this.
 _EMAIL_TIMEOUT = 4
 
-# Domains whose email addresses are never real business contacts.
-_IGNORE_EMAIL_DOMAINS = [
-    "sentry.io",
-    "wixpress.com",
-    "squarespace.com",
-    "wordpress.com",
-    "example.com",
-    "googleapis.com",
-    "schema.org",
-    "w3.org",
-]
-
-# Common non-contact file extensions that can appear next to email-like tokens.
-_IGNORE_EMAIL_SUFFIXES = (
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".webp",
-    ".svg",
-    ".css",
-    ".js",
-)
-
 # Lightweight page list that catches common contact-page URL conventions.
-_EMAIL_FALLBACK_PATHS = ("/contact", "/contact-us", "/about", "/about-us")
+_EMAIL_FALLBACK_PATHS = (
+    "/contact",
+    "/contact-us",
+    "/get-in-touch",
+    "/about",
+    "/about-us",
+)
 
 # Matches any string that looks like an email address.
 _EMAIL_PATTERN = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
 
 
-def extract_email(website_url: str) -> str:
+def extract_email(website_url: str, timeout: int = _EMAIL_TIMEOUT) -> str:
     """Extract a publicly listed contact email from a business website.
 
     Strategy:
       1. Fetch the homepage — scan for mailto: links first (most reliable),
          then fall back to plain-text email pattern matching.
-      2. If no address is found on the homepage, repeat the scan on /contact.
-      3. Return the first valid business email found.
+      2. Reject placeholder, fake, file-name, and automated emails.
+      3. If no address is found on the homepage, repeat common fallback pages.
       4. Return empty string on any failure.
 
     Never raises exceptions. Never waits more than 4 seconds per request.
@@ -152,27 +140,19 @@ def extract_email(website_url: str) -> str:
             return stripped
         return f"https://{stripped}"
 
-    def _is_valid_business_email(email: str) -> bool:
-        """Return True if the email looks like a real business contact address."""
-        lower = email.lower()
-        if any(domain in lower for domain in _IGNORE_EMAIL_DOMAINS):
-            return False
-        if lower.startswith("noreply") or lower.startswith("no-reply"):
-            return False
-        if lower.endswith(_IGNORE_EMAIL_SUFFIXES):
-            return False
-        return True
-
-    def _extract_from_html(html: str) -> str:
-        """Return the first valid business email found in an HTML string."""
+    def _extract_candidates_from_html(html: str) -> list[str]:
+        """Return email-like candidates from mailto links and visible page text."""
         decoded_html = unescape(html)
+        candidates = []
         seen = set()
 
         # mailto: links are the most authoritative — check them first.
         for email in re.findall(r"mailto:(" + _EMAIL_PATTERN + r")", decoded_html):
             email = email.strip().strip(".,;:)")
-            if _is_valid_business_email(email):
-                return email
+            lower = email.lower()
+            if lower not in seen:
+                seen.add(lower)
+                candidates.append(email)
 
         # Fall back to bare email addresses in the page body.
         for email in re.findall(_EMAIL_PATTERN, decoded_html):
@@ -181,14 +161,13 @@ def extract_email(website_url: str) -> str:
             if lower in seen:
                 continue
             seen.add(lower)
-            if _is_valid_business_email(email):
-                return email
-        return ""
+            candidates.append(email)
+        return candidates
 
     def _fetch_html(url: str) -> str:
         """Fetch a URL and return the response body; empty string on any error."""
         try:
-            resp = requests.get(url, timeout=_EMAIL_TIMEOUT, headers=headers, allow_redirects=True)
+            resp = requests.get(url, timeout=timeout, headers=headers, allow_redirects=True)
             return resp.text
         except requests.exceptions.Timeout:
             logger.warning("Timeout fetching %s for email — skipping.", url)
@@ -201,12 +180,32 @@ def extract_email(website_url: str) -> str:
             return ""
 
     normalized_url = _normalize_url(website_url)
+    rejected_total = 0
 
     # --- Homepage and lightweight fallback pages ---
     for page_url in [normalized_url, *[urljoin(normalized_url.rstrip("/") + "/", path) for path in _EMAIL_FALLBACK_PATHS]]:
         html = _fetch_html(page_url)
-        email = _extract_from_html(html)
+        candidates = _extract_candidates_from_html(html)
+        email, rejected_count = validate_email_list(candidates)
+        rejected_total += rejected_count
         if email:
+            record_email_validation_result(accepted=True, rejected_count=rejected_total)
+            if rejected_total:
+                logger.debug("Rejected %d fake email(s) before accepting %s", rejected_total, email)
             return email
 
+    if rejected_total:
+        record_email_validation_result(accepted=False, rejected_count=rejected_total)
+    return ""
+
+
+def extract_emails_with_fallback(prospect: dict, timeout: int = _EMAIL_TIMEOUT) -> str:
+    """Extract a valid email for a prospect by checking common fallback pages."""
+    website = str(prospect.get("website", "")).strip()
+    if not website:
+        return ""
+
+    email = extract_email(website, timeout=timeout)
+    if email and not is_fake_email(email):
+        return email
     return ""

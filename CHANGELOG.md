@@ -2,6 +2,34 @@
 
 ---
 
+## [2026-06-30 15:00 EDT] — feat: filter fake scraper emails
+
+**Files Added:** `pipeline/email_validation.py`, `tests/test_email_validation.py`
+
+**Files Modified:** `pipeline/social.py`, `pipeline/__init__.py`, `main.py`, `CHANGELOG.md`
+
+### Summary
+Added source-level email validation so the scraper rejects fake, placeholder,
+file-like, platform, and automated email addresses before saving prospect data.
+
+### Behavior
+- Added centralized email validation helpers and thread-safe run counters.
+- Updated email extraction to collect mailto/body candidates, reject fake
+  candidates, and continue through homepage plus contact/about fallback pages
+  until a legitimate business email is found.
+- Preserved legitimate generic business mailboxes such as
+  `info@grimascleaningservice.com` while rejecting placeholder-domain examples
+  such as `info@mysite.com`.
+- Added email validation stats to the human run summary and `SCRAPING_STATS`
+  payload.
+
+### Verification
+- `python3 -m py_compile main.py pipeline/social.py pipeline/email_validation.py tests/test_email_validation.py`
+- `python3 -m unittest tests/test_email_validation.py`
+- `python3 -m unittest tests/test_email_validation.py tests/test_parallel_launcher.py tests/test_dynamic_schema.py`
+
+---
+
 ## [2026-06-25 18:51 EDT] — feat: add aggregate reporting to parallel scraper
 
 **Files Modified:** `main.py`, `run_scraper_parallel.py`, `tests/test_parallel_launcher.py`, `README.md`, `CHANGELOG.md`

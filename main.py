@@ -153,6 +153,7 @@ def print_summary(
     enabled_extractors: list[str],
     appended_count: int | None = None,
     append_skipped_duplicates: int = 0,
+    extraction_stats: dict[str, int | float] | None = None,
 ) -> None:
     """Print a structured console report after a prospecting run.
 
@@ -214,6 +215,10 @@ def print_summary(
     print(f"  Instagram extractor: {'enabled' if 'instagram_url' in enabled_extractors else 'disabled'}")
     print(f"  Emails found:    {emails_found:>4} / {sites_total} prospects with websites")
     print(f"  Instagram URLs:  {instagram_found:>4} / {sites_total} prospects with websites")
+    if extraction_stats and "email" in enabled_extractors:
+        print(f"  Emails accepted: {extraction_stats.get('emails_validated', 0):>4}")
+        print(f"  Emails rejected: {extraction_stats.get('emails_rejected', 0):>4}")
+        print(f"  Fake email rate: {extraction_stats.get('fake_email_rate', 0):>4}%")
 
     # --- Lead score stats ---
     scores = [safe_int(p.get("lead_score", 0)) for p in added]
@@ -298,7 +303,10 @@ def print_summary(
     print(f"{'=' * 52}\n")
 
 
-def print_scraping_summary(new_prospects: list[dict[str, Any]]) -> None:
+def print_scraping_summary(
+    new_prospects: list[dict[str, Any]],
+    extraction_stats: dict[str, int | float] | None = None,
+) -> None:
     """Emit machine-readable scraping stats for the parallel launcher."""
     category_counts = dict.fromkeys(REPORT_CATEGORIES, 0)
     emails_by_category = dict.fromkeys(REPORT_CATEGORIES, 0)
@@ -332,6 +340,14 @@ def print_scraping_summary(new_prospects: list[dict[str, Any]]) -> None:
         "instagrams_by_category": instagrams_by_category,
         "instagrams_captured_percent": round((instagrams_found / total * 100), 1) if total else 0,
     }
+    if extraction_stats:
+        summary.update(
+            {
+                "emails_validated": extraction_stats.get("emails_validated", 0),
+                "emails_rejected": extraction_stats.get("emails_rejected", 0),
+                "fake_email_rate": extraction_stats.get("fake_email_rate", 0),
+            }
+        )
 
     print("SCRAPING_STATS:" + json.dumps(summary, sort_keys=True), file=sys.stderr)
 
@@ -404,6 +420,9 @@ def main() -> None:
     prospects_with_sites = [p for p in new_prospects if p.get("website")]
 
     if prospects_with_sites and enabled_extractors:
+        from pipeline.email_validation import reset_email_validation_stats
+
+        reset_email_validation_stats()
         logger.info(
             "Extracting contact data for %d prospects...",
             len(prospects_with_sites),
@@ -455,6 +474,13 @@ def main() -> None:
         if "instagram_url" not in p:
             p["instagram_url"] = ""
 
+    if "email" in enabled_extractors:
+        from pipeline.email_validation import get_email_validation_stats
+
+        extraction_stats = get_email_validation_stats()
+    else:
+        extraction_stats = None
+
     append_result = sheets_client.append_prospects(new_prospects)
     print_summary(
         args.zip_code,
@@ -465,8 +491,9 @@ def main() -> None:
         enabled_extractors=enabled_extractors,
         appended_count=append_result["appended"],
         append_skipped_duplicates=append_result["skipped_duplicates"],
+        extraction_stats=extraction_stats,
     )
-    print_scraping_summary(new_prospects)
+    print_scraping_summary(new_prospects, extraction_stats=extraction_stats)
 
 
 if __name__ == "__main__":
