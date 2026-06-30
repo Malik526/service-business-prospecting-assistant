@@ -2,6 +2,30 @@
 
 ---
 
+## [2026-06-30 16:40 EDT] — fix: add safe placeholder email username filters
+
+**Files Modified:** `pipeline/email_validation.py`, `tests/test_email_validation.py`,
+`CHANGELOG.md`
+
+### Summary
+Added explicit rejection for `your@`, `youremail@`, and `yourname@`
+placeholder email usernames while preserving legitimate generic business
+mailboxes.
+
+### Behavior
+- Added `your`, `youremail`, and `yourname` to the always-placeholder username
+  filter list.
+- Kept `info@` acceptance dependent on the domain so real business addresses
+  such as `info@grimascleaningservice.com` remain valid.
+- Extended email validation tests to cover the new placeholder usernames and
+  the existing legitimate `info@` behavior.
+
+### Verification
+- `python3 -m py_compile pipeline/email_validation.py tests/test_email_validation.py`
+- `python3 -m unittest tests/test_email_validation.py`
+
+---
+
 ## [2026-06-30 15:55 EDT] — feat: add weekly scraper trigger setup
 
 **Files Added:** `batch_1_west.json`, `batch_2_south_tx.json`,

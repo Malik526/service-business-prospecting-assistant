@@ -27,6 +27,9 @@ FAKE_EMAIL_PATTERNS = {
     ],
     "always_placeholder_usernames": [
         "user",
+        "your",
+        "youremail",
+        "yourname",
         "test",
         "example",
         "email",

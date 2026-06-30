@@ -29,6 +29,9 @@ class EmailValidationTests(unittest.TestCase):
         """Reject placeholder domains, file-name matches, and test emails."""
         fake_emails = [
             "user@domain.com",
+            "your@realbusiness.com",
+            "youremail@realbusiness.com",
+            "yourname@realbusiness.com",
             "info@mysite.com",
             "header@2x.jpg",
             "example@domain.com",
