@@ -1,0 +1,13 @@
+{
+  "default_radius": 30,
+  "default_categories": "electrician,hvac,plumber",
+  "batch_name": "Midwest & Southwest Metros - Week 7",
+  "description": "5 metros: Columbus, Cincinnati, Des Moines, Oklahoma City, Albuquerque",
+  "zip_codes": [
+    "43215",
+    "45202",
+    "50309",
+    "73102",
+    "87102"
+  ]
+}

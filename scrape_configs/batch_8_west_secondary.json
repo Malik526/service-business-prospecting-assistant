@@ -1,0 +1,13 @@
+{
+  "default_radius": 30,
+  "default_categories": "electrician,hvac,plumber",
+  "batch_name": "West Coast Secondary Markets - Week 8",
+  "description": "5 metros: Sacramento, Fresno, Riverside, Spokane, Boise",
+  "zip_codes": [
+    "95814",
+    "93650",
+    "92501",
+    "99201",
+    "83702"
+  ]
+}

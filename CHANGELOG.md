@@ -2,6 +2,43 @@
 
 ---
 
+## [2026-06-30 16:59 EDT] — feat: organize scraper configs
+
+**Files Added:** `scrape_configs/batch_6_northeast_southeast.json`,
+`scrape_configs/batch_7_midwest_southwest.json`,
+`scrape_configs/batch_8_west_secondary.json`
+
+**Files Moved:** `batch_1_west.json`, `batch_2_south_tx.json`,
+`batch_3_south_atlantic.json`, `batch_4_midwest.json`,
+`batch_5_mountain.json`, `scrape_config.json`, `scrape_config_1.json`
+into `scrape_configs/`
+
+**Files Modified:** `run_scraper_parallel.py`, `setup_triggers.py`,
+`tests/test_parallel_launcher.py`, `README.md`, `CHANGELOG.md`
+
+### Summary
+Added batches 6-8 and organized all scraper config JSON files into a dedicated
+`scrape_configs/` folder.
+
+### Behavior
+- Added Northeast/Southeast, Midwest/Southwest, and West secondary-market batch
+  configs.
+- Moved all existing batch and ad hoc scrape configs into `scrape_configs/`.
+- Updated the parallel launcher default config path to
+  `scrape_configs/scrape_config.json`.
+- Updated launcher config loading so relative paths resolve from the project
+  directory.
+- Updated scheduled trigger setup paths for the moved batch 1-5 configs.
+- Updated README examples for the new config paths and batch 6-8 commands.
+
+### Verification
+- `python3 -m py_compile run_scraper_parallel.py setup_triggers.py tests/test_parallel_launcher.py`
+- `python3 -m json.tool` for every JSON file in `scrape_configs/`
+- `python3 -m unittest tests/test_parallel_launcher.py`
+- `python3 run_scraper_parallel.py --help`
+
+---
+
 ## [2026-06-30 16:40 EDT] — fix: add safe placeholder email username filters
 
 **Files Modified:** `pipeline/email_validation.py`, `tests/test_email_validation.py`,

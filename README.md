@@ -388,15 +388,23 @@ prospect websites. Use `--skip-instagram` for email-focused scrapes,
 `--skip-email` for Instagram-only scrapes, or both flags for the fastest
 Google-data-only run.
 
-Run several ZIP codes in parallel from `scrape_config.json`:
+Run several ZIP codes in parallel from `scrape_configs/scrape_config.json`:
 
 ```bash
 python3 run_scraper_parallel.py
-python3 run_scraper_parallel.py --config scrape_config.json
+python3 run_scraper_parallel.py --config scrape_configs/scrape_config.json
 ```
 
-Edit `scrape_config.json` to change the shared radius, shared categories, or
-ZIP list:
+Run one of the organized weekly batch configs:
+
+```bash
+python3 run_scraper_parallel.py --config scrape_configs/batch_6_northeast_southeast.json
+python3 run_scraper_parallel.py --config scrape_configs/batch_7_midwest_southwest.json
+python3 run_scraper_parallel.py --config scrape_configs/batch_8_west_secondary.json
+```
+
+Edit `scrape_configs/scrape_config.json` to change the shared radius, shared
+categories, or ZIP list:
 
 ```json
 {

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Create weekly Claude Code Remote triggers for batch scraping.
 
-This file exists so the five metro batch configs can be registered once in
+This file exists so the metro batch configs can be registered once in
 Claude Code Remote, then run automatically on weekday schedules. It depends on
 the Claude Code Remote runtime exposing `claude_code_remote.create_trigger`.
 """
@@ -15,6 +15,7 @@ from claude_code_remote import create_trigger
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
+CONFIG_DIR = "scrape_configs"
 SCRAPER_SCRIPT = "run_scraper_parallel.py"
 
 
@@ -32,31 +33,31 @@ TRIGGERS: tuple[TriggerDefinition, ...] = (
         "name": "MoreClientsCo Batch 1 - West Coast",
         "description": "Weekly: LA, SF, San Diego, Seattle, Denver (5 ZIPs)",
         "cron": "0 9 * * 1",
-        "batch_config": "batch_1_west.json",
+        "batch_config": f"{CONFIG_DIR}/batch_1_west.json",
     },
     {
         "name": "MoreClientsCo Batch 2 - South TX",
         "description": "Weekly: Houston, Dallas, Austin, San Antonio, Phoenix, Vegas (6 ZIPs)",
         "cron": "0 9 * * 2",
-        "batch_config": "batch_2_south_tx.json",
+        "batch_config": f"{CONFIG_DIR}/batch_2_south_tx.json",
     },
     {
         "name": "MoreClientsCo Batch 3 - South Atlantic",
         "description": "Weekly: Miami, Tampa, Orlando, Atlanta, Charlotte, Nashville (6 ZIPs)",
         "cron": "0 9 * * 3",
-        "batch_config": "batch_3_south_atlantic.json",
+        "batch_config": f"{CONFIG_DIR}/batch_3_south_atlantic.json",
     },
     {
         "name": "MoreClientsCo Batch 4 - Midwest",
         "description": "Weekly: Chicago, Minneapolis, Detroit, Milwaukee, St. Louis (5 ZIPs)",
         "cron": "0 9 * * 4",
-        "batch_config": "batch_4_midwest.json",
+        "batch_config": f"{CONFIG_DIR}/batch_4_midwest.json",
     },
     {
         "name": "MoreClientsCo Batch 5 - Mountain",
         "description": "Weekly: Portland, SLC, KC, Indianapolis, Memphis (5 ZIPs)",
         "cron": "0 9 * * 5",
-        "batch_config": "batch_5_mountain.json",
+        "batch_config": f"{CONFIG_DIR}/batch_5_mountain.json",
     },
 )
 
@@ -106,7 +107,7 @@ def main() -> None:
     trigger_ids: list[object] = []
 
     for index, trigger_definition in enumerate(TRIGGERS, 1):
-        print(f"[{index}/5] Creating trigger: {trigger_definition['name']}")
+        print(f"[{index}/{len(TRIGGERS)}] Creating trigger: {trigger_definition['name']}")
         trigger = create_scraper_trigger(trigger_definition)
         trigger_id = trigger["id"]
         trigger_ids.append(trigger_id)

@@ -1,0 +1,14 @@
+{
+  "default_radius": 30,
+  "default_categories": "electrician,hvac,plumber",
+  "batch_name": "Northeast & Southeast Metros - Week 6",
+  "description": "6 metros: Boston, Philadelphia, Providence, Louisville, Birmingham, Raleigh",
+  "zip_codes": [
+    "02101",
+    "19101",
+    "02903",
+    "40202",
+    "35203",
+    "27601"
+  ]
+}

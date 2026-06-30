@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch multiple prospect scrapers in parallel from scrape_config.json.
+"""Launch multiple prospect scrapers in parallel from scrape_configs/scrape_config.json.
 
 This script keeps parallel scraping simple: one JSON file defines the shared
 radius, shared category filter, and ZIP codes to run. Each ZIP launches a
@@ -22,7 +22,7 @@ from typing import Any
 
 LOGGER = logging.getLogger(__name__)
 PROJECT_DIR = Path(__file__).resolve().parent
-DEFAULT_CONFIG_FILE = "scrape_config.json"
+DEFAULT_CONFIG_FILE = "scrape_configs/scrape_config.json"
 DEFAULT_RADIUS = 30
 DEFAULT_CATEGORIES = "electrician,hvac,plumber"
 LAUNCH_DELAY_SECONDS = 1
@@ -44,7 +44,7 @@ def parse_args(argv: list[str] | None = None) -> Namespace:
     parser.add_argument(
         "--config",
         default=DEFAULT_CONFIG_FILE,
-        help="Path to scrape config JSON. Defaults to scrape_config.json.",
+        help="Path to scrape config JSON. Defaults to scrape_configs/scrape_config.json.",
     )
     return parser.parse_args(argv)
 
@@ -52,6 +52,9 @@ def parse_args(argv: list[str] | None = None) -> Namespace:
 def load_config(config_file: str = DEFAULT_CONFIG_FILE) -> dict[str, Any]:
     """Load scraping configuration from a JSON file."""
     config_path = Path(config_file)
+    if not config_path.is_absolute():
+        config_path = PROJECT_DIR / config_path
+
     if not config_path.exists():
         LOGGER.error("Config file not found: %s", config_file)
         raise SystemExit(1)
@@ -71,7 +74,7 @@ def validate_config(config: dict[str, Any]) -> tuple[float, str, list[str]]:
     zip_codes = config.get("zip_codes", [])
 
     if not isinstance(zip_codes, list) or not zip_codes:
-        LOGGER.error("No ZIP codes found in %s", DEFAULT_CONFIG_FILE)
+        LOGGER.error("No ZIP codes found in config.")
         raise SystemExit(1)
 
     normalized_zips = [str(zip_code).strip() for zip_code in zip_codes if str(zip_code).strip()]

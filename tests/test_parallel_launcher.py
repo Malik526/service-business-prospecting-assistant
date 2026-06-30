@@ -42,6 +42,35 @@ class ParallelLauncherTests(unittest.TestCase):
                 },
             )
 
+    def test_load_config_resolves_relative_path_from_project_dir(self) -> None:
+        """Load relative config paths from the launcher project directory."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_dir = Path(temp_dir) / "scrape_configs"
+            config_dir.mkdir()
+            config_path = config_dir / "scrape_config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "default_radius": 15,
+                        "default_categories": "plumber",
+                        "zip_codes": ["10001"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("run_scraper_parallel.PROJECT_DIR", Path(temp_dir)):
+                config = run_scraper_parallel.load_config("scrape_configs/scrape_config.json")
+
+        self.assertEqual(
+            config,
+            {
+                "default_radius": 15,
+                "default_categories": "plumber",
+                "zip_codes": ["10001"],
+            },
+        )
+
     def test_validate_config_normalizes_values(self) -> None:
         """Normalize radius, category, and ZIP values from config."""
         radius, categories, zip_codes = run_scraper_parallel.validate_config(
