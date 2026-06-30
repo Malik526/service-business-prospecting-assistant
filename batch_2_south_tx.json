@@ -1,0 +1,14 @@
+{
+  "default_radius": 30,
+  "default_categories": "electrician,hvac,plumber",
+  "batch_name": "South Texas & Southwest Metros - Week 2",
+  "description": "Top 6 metros: Houston, Dallas, Austin, San Antonio, Phoenix, Las Vegas",
+  "zip_codes": [
+    "77001",
+    "75201",
+    "78701",
+    "78201",
+    "85001",
+    "89101"
+  ]
+}

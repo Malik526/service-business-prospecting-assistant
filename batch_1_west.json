@@ -1,0 +1,13 @@
+{
+  "default_radius": 30,
+  "default_categories": "electrician,hvac,plumber",
+  "batch_name": "West Coast Metros - Week 1",
+  "description": "Top 5 West Coast metros: LA, SF, San Diego, Seattle, Denver",
+  "zip_codes": [
+    "90001",
+    "94102",
+    "92101",
+    "98101",
+    "80202"
+  ]
+}

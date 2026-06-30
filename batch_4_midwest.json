@@ -1,0 +1,13 @@
+{
+  "default_radius": 30,
+  "default_categories": "electrician,hvac,plumber",
+  "batch_name": "Midwest Metros - Week 4",
+  "description": "Top 5 metros: Chicago, Minneapolis, Detroit, Milwaukee, St. Louis",
+  "zip_codes": [
+    "60601",
+    "55401",
+    "48226",
+    "53202",
+    "63101"
+  ]
+}

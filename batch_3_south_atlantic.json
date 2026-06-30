@@ -1,0 +1,14 @@
+{
+  "default_radius": 30,
+  "default_categories": "electrician,hvac,plumber",
+  "batch_name": "South Atlantic Metros - Week 3",
+  "description": "Top 6 metros: Miami, Tampa, Orlando, Atlanta, Charlotte, Nashville",
+  "zip_codes": [
+    "33101",
+    "33602",
+    "32801",
+    "30303",
+    "28202",
+    "37201"
+  ]
+}

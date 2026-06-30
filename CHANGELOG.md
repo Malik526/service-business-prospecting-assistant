@@ -2,6 +2,41 @@
 
 ---
 
+## [2026-06-30 15:55 EDT] — feat: add weekly scraper trigger setup
+
+**Files Added:** `batch_1_west.json`, `batch_2_south_tx.json`,
+`batch_3_south_atlantic.json`, `batch_4_midwest.json`,
+`batch_5_mountain.json`, `setup_triggers.py`
+
+**Files Modified:** `CHANGELOG.md`
+
+### Summary
+Added five weekday batch config files and a Claude Code Remote trigger setup
+script for autonomous weekly prospect scraping.
+
+### Behavior
+- Added Monday-Friday batch configs covering 27 metro ZIP codes across West
+  Coast, South TX/Southwest, South Atlantic, Midwest, and Mountain/additional
+  metros.
+- Added `setup_triggers.py` to create one scheduled Claude Code Remote trigger
+  per batch at 9 AM on weekdays.
+- Anchored each remote trigger script to this project directory before running
+  `run_scraper_parallel.py --config ...`.
+- Added setup validation so missing batch files or scraper launcher files are
+  caught before remote triggers are created.
+
+### Verification
+- `python3 -m py_compile setup_triggers.py`
+- `python3 -m json.tool batch_1_west.json`
+- `python3 -m json.tool batch_2_south_tx.json`
+- `python3 -m json.tool batch_3_south_atlantic.json`
+- `python3 -m json.tool batch_4_midwest.json`
+- `python3 -m json.tool batch_5_mountain.json`
+- `setup_triggers.py` was not executed locally because it would create live
+  Claude Code Remote scheduled triggers.
+
+---
+
 ## [2026-06-30 15:00 EDT] — feat: filter fake scraper emails
 
 **Files Added:** `pipeline/email_validation.py`, `tests/test_email_validation.py`

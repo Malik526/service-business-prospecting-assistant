@@ -1,0 +1,13 @@
+{
+  "default_radius": 30,
+  "default_categories": "electrician,hvac,plumber",
+  "batch_name": "Mountain & Additional Metros - Week 5",
+  "description": "Top 5 metros: Portland, Salt Lake City, Kansas City, Indianapolis, Memphis",
+  "zip_codes": [
+    "97201",
+    "84101",
+    "64105",
+    "46204",
+    "38103"
+  ]
+}
