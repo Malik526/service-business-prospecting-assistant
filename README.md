@@ -434,6 +434,52 @@ After each run, the CLI prints:
 
 ---
 
+## Research Brief Pipeline
+
+Use `run_pipeline.py` after a prospect already exists in the Google Sheet and
+you want to generate a website/client brief JSON for that one business.
+
+Normal workflow:
+
+```bash
+python main.py --zip 11385 --radius 20
+python run_pipeline.py --place-id <GOOGLE_PLACE_ID>
+```
+
+Example:
+
+```bash
+python run_pipeline.py --place-id ChIJhVpybR5fwokRSgKTBw5tuUU
+```
+
+Override the sheet for one run:
+
+```bash
+python run_pipeline.py --place-id <GOOGLE_PLACE_ID> --sheet-id <SHEET_ID>
+```
+
+The `Place ID` must already exist in the `PROSPECTS` sheet. If it is missing,
+the pipeline exits early and asks you to run `main.py` first or verify the
+Place ID.
+
+The research pipeline:
+
+1. Looks up the prospect in Google Sheets by `Place ID`.
+2. Fetches real five-star Google reviews for that business.
+3. Sends the prospect data and reviews to Claude.
+4. Writes the final brief to `briefs/<business-slug>.json`.
+
+Required `.env` values:
+
+```bash
+ANTHROPIC_API_KEY=your_anthropic_api_key
+GOOGLE_PLACES_API_KEY=your_google_api_key
+GOOGLE_SHEET_ID=your_google_sheet_id
+GOOGLE_SERVICE_ACCOUNT_FILE=~/growth_agency/credentials/service-account.json
+```
+
+---
+
 ## Contact Backfill
 
 Use `backfill_emails.py` to fill missing contact fields on existing sheet rows

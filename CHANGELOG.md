@@ -2,6 +2,24 @@
 
 ---
 
+## [2026-07-07 18:52 EDT] — docs: document research brief pipeline usage
+
+**Files Modified:** `README.md`, `CHANGELOG.md`
+
+### Summary
+Added README instructions for using `run_pipeline.py` to generate a single
+prospect research brief after the prospect exists in Google Sheets.
+
+### Behavior
+- Documented the normal `main.py` then `run_pipeline.py` workflow.
+- Added examples for `--place-id` and optional `--sheet-id` usage.
+- Listed required environment variables and the generated brief output path.
+
+### Verification
+- Documentation-only change; local project verification was not applicable.
+
+---
+
 ## [2026-06-30 16:59 EDT] — feat: organize scraper configs
 
 **Files Added:** `scrape_configs/batch_6_northeast_southeast.json`,
