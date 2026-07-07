@@ -2,6 +2,28 @@
 
 ---
 
+## [2026-07-07 18:57 EDT] — feat: add standalone place id research script
+
+**Files Added:** `research_by_place_id.py`
+
+**Files Modified:** `README.md`, `CHANGELOG.md`
+
+### Summary
+Added a standalone Place ID research script that fetches Google Places details
+directly and generates a Claude brand brief without requiring Google Sheets.
+
+### Behavior
+- Added `research_by_place_id.py` with direct Place Details lookup by Place ID.
+- Converts Place Details into the existing research agent prospect format.
+- Filters returned Google reviews to five-star reviews before prompting Claude.
+- Writes a clean brand brief JSON file in the project root.
+- Documented when to use the standalone script versus `run_pipeline.py`.
+
+### Verification
+- `python3 -m py_compile research_by_place_id.py`
+
+---
+
 ## [2026-07-07 18:52 EDT] — docs: document research brief pipeline usage
 
 **Files Modified:** `README.md`, `CHANGELOG.md`

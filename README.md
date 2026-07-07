@@ -480,6 +480,47 @@ GOOGLE_SERVICE_ACCOUNT_FILE=~/growth_agency/credentials/service-account.json
 
 ---
 
+## Standalone Place ID Research
+
+Use `research_by_place_id.py` when you want to generate a brand brief from a
+Google Place ID without adding the prospect to Google Sheets first.
+
+```bash
+python3 research_by_place_id.py "<GOOGLE_PLACE_ID>"
+```
+
+Example:
+
+```bash
+python3 research_by_place_id.py "0x42a34a656e8893f9:0xd6c1242ffcf0d3f9"
+```
+
+This script:
+
+1. Fetches business details directly from Google Places.
+2. Filters returned reviews down to five-star reviews.
+3. Sends the business details and reviews to the existing Claude research agent.
+4. Writes a clean brand brief JSON file in the project root.
+
+Output files are named like:
+
+```text
+brief_<place-id-fragment>_<timestamp>.json
+```
+
+Only these `.env` values are required for standalone research:
+
+```bash
+ANTHROPIC_API_KEY=your_anthropic_api_key
+GOOGLE_PLACES_API_KEY=your_google_api_key
+```
+
+Use `run_pipeline.py` when the business is already in the `PROSPECTS` sheet and
+you want the final merged brief structure. Use `research_by_place_id.py` for
+quick research on a business that is not in the sheet yet.
+
+---
+
 ## Contact Backfill
 
 Use `backfill_emails.py` to fill missing contact fields on existing sheet rows
