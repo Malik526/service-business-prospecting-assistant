@@ -2,6 +2,37 @@
 
 ---
 
+## [2026-07-15 03:58 EDT] — feat: add SaaS prospecting frontend
+
+**Files Added:** `service-prospecting-frontend/`
+
+**Files Modified:** `README.md`, `.gitignore`, `CHANGELOG.md`
+
+### Summary
+Added the Phase 2 Next.js frontend for the Service Business Prospecting SaaS
+MVP, ready for local use and Netlify deployment.
+
+### Behavior
+- Added a TypeScript Next.js app at `service-prospecting-frontend/`.
+- Added a `/prospecting` workspace with ZIP, radius, and category controls.
+- Added a typed Axios API client pointed at `NEXT_PUBLIC_LAMBDA_URL`.
+- Added a responsive prospects table using the backend's `distance_miles` field.
+- Added PapaParse CSV export for current search results.
+- Added persistent local guest user IDs for MVP deduplication.
+- Added modular form, result, and UI components with folder barrel exports.
+- Added local `.env.local` for development and `.env.example` for deployment setup.
+- Pinned patched frontend dependencies and added a PostCSS override after audit.
+
+### Verification
+- `npm run typecheck`
+- `npm run lint`
+- `npm run build`
+- `npm audit --omit=dev` returned `found 0 vulnerabilities`
+- `npm run dev -- --hostname 127.0.0.1 --port 3000`
+- `GET http://127.0.0.1:3000/prospecting` returned HTTP 200
+
+---
+
 ## [2026-07-15 03:41 EDT] — feat: scaffold SaaS prospecting backend
 
 **Files Added:** `service-prospecting-backend/main.py`,

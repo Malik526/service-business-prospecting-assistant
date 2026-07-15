@@ -639,6 +639,38 @@ uvicorn main:app --reload
 
 Then open `http://localhost:8000/docs`.
 
+### SaaS Frontend MVP
+
+The `service-prospecting-frontend/` folder contains the Phase 2 Next.js
+frontend for the SaaS version of this tool. It provides a ZIP/radius/category
+search form, calls the backend API, renders scored prospects in a responsive
+table, and exports results to CSV.
+
+Frontend files include:
+
+| Path | Purpose |
+|---|---|
+| `service-prospecting-frontend/pages/prospecting.tsx` | Main prospecting workspace |
+| `service-prospecting-frontend/components/forms/` | Search form component |
+| `service-prospecting-frontend/components/results/` | Results table component |
+| `service-prospecting-frontend/components/ui/` | Alert, loading, and empty states |
+| `service-prospecting-frontend/lib/api.ts` | Typed backend API client |
+| `service-prospecting-frontend/lib/csv.ts` | CSV export helper |
+| `service-prospecting-frontend/lib/content.ts` | User-facing app copy and category options |
+
+Run locally:
+
+```bash
+cd service-prospecting-frontend
+npm install
+cp .env.example .env.local
+npm run dev
+```
+
+Then open `http://localhost:3000/prospecting`. Keep
+`NEXT_PUBLIC_LAMBDA_URL=http://localhost:8000` for local backend testing, and
+replace it with the deployed Lambda Function URL in Netlify.
+
 ---
 
 ## Common Debugging Issues

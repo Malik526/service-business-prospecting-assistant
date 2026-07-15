@@ -13,3 +13,4 @@ service-prospecting-frontend/.env.local
 service-prospecting-frontend/.next/
 service-prospecting-frontend/node_modules/
 service-prospecting-frontend/out/
+service-prospecting-frontend/tsconfig.tsbuildinfo
