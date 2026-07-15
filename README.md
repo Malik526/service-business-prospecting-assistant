@@ -629,6 +629,14 @@ Expected DynamoDB table shape:
 | `user_id` | String partition key |
 | `place_id` | String sort key |
 
+Phase 4 also expects optional monetization and analytics tables:
+
+| Table | Suggested key shape | Purpose |
+|---|---|---|
+| `usage_logs` | `user_id` partition key, `timestamp` sort key | Search event logging |
+| `search_history` | `user_id` partition key, `search_id` sort key | Saved search history |
+| `feedback` | `feedback_id` partition key | Product feedback submissions |
+
 Run locally:
 
 ```bash
@@ -670,6 +678,42 @@ npm run dev
 Then open `http://localhost:3000/prospecting`. Keep
 `NEXT_PUBLIC_LAMBDA_URL=http://localhost:8000` for local backend testing, and
 replace it with the deployed Lambda Function URL in Netlify.
+
+### Phase 4 Monetization Setup
+
+Phase 4 adds Supabase Auth, free-tier usage caps, Stripe subscription checkout,
+basic admin metrics, and a feedback form.
+
+Frontend routes:
+
+| Route | Purpose |
+|---|---|
+| `/auth` | Supabase login |
+| `/prospecting` | Protected prospect search workspace |
+| `/upgrade` | Stripe checkout plan selection |
+| `/upgrade-success` | Stripe checkout success return |
+| `/upgrade-canceled` | Stripe checkout cancellation return |
+| `/feedback` | Product feedback form |
+| `/admin/dashboard` | Manual admin metrics review |
+
+Backend routes:
+
+| Route | Purpose |
+|---|---|
+| `POST /api/create-checkout-session` | Start Stripe Checkout |
+| `POST /api/billing-portal` | Open Stripe Billing Portal |
+| `POST /webhook/stripe` | Sync subscription status from Stripe |
+| `POST /api/feedback` | Store feedback |
+| `GET /api/admin/stats` | Return admin metrics with `ADMIN_KEY` |
+
+Required external setup:
+
+1. Create a separate Supabase project.
+2. Create the Supabase `users` table and RLS policy from the Phase 4 brief.
+3. Create Stripe products/prices for Starter, Pro, and Business tiers.
+4. Add Supabase, Stripe, and DynamoDB table variables to backend `.env`.
+5. Add Supabase public keys and Stripe price IDs to frontend `.env.local`.
+6. Configure the Stripe webhook to call `/webhook/stripe`.
 
 ---
 

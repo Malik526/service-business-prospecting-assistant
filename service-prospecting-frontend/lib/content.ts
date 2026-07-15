@@ -13,6 +13,15 @@ export const appContent = {
   noResultsBody: "Try a larger radius, fewer categories, or a nearby ZIP code.",
   errorTitle: "Search failed",
   footer: "Service Prospecting v1.0. Data from Google Places.",
+  authTitle: "Sign in to Service Prospecting",
+  authBody: "Use your account to track searches, save usage history, and manage upgrades.",
+  setupTitle: "Supabase setup required",
+  setupBody: "Add Supabase project URL and anon key values before enabling authenticated access.",
+  usageLabel: "Monthly searches",
+  upgradeTitle: "Choose a plan",
+  upgradeBody: "Start free, then upgrade when search volume proves useful.",
+  feedbackTitle: "Share product feedback",
+  feedbackBody: "Tell us what worked, what blocked you, and what would make this worth paying for.",
 };
 
 export const categoryOptions = [
@@ -34,3 +43,52 @@ export const defaultSearchValues = {
   categories: "electrician,plumber",
 };
 
+export const pricingTiers = [
+  {
+    name: "Free",
+    price: "$0",
+    period: "forever",
+    searches: "25 searches/month",
+    priceId: "",
+    features: ["25 monthly searches", "Lead scoring", "CSV export", "Google Maps links"],
+  },
+  {
+    name: "Starter",
+    price: "$29",
+    period: "month",
+    searches: "250 searches/month",
+    priceId: process.env.NEXT_PUBLIC_STRIPE_PRICE_STARTER_MONTHLY || "price_starter_monthly",
+    features: [
+      "250 monthly searches",
+      "Everything in Free",
+      "Priority search capacity",
+      "Email support",
+    ],
+  },
+  {
+    name: "Pro",
+    price: "$79",
+    period: "month",
+    searches: "1,000 searches/month",
+    priceId: process.env.NEXT_PUBLIC_STRIPE_PRICE_PRO_MONTHLY || "price_pro_monthly",
+    features: [
+      "1,000 monthly searches",
+      "Everything in Starter",
+      "Phone support",
+      "Advanced analytics",
+    ],
+  },
+  {
+    name: "Business",
+    price: "$199",
+    period: "month",
+    searches: "5,000 searches/month",
+    priceId: process.env.NEXT_PUBLIC_STRIPE_PRICE_BUSINESS_MONTHLY || "price_business_monthly",
+    features: [
+      "5,000 monthly searches",
+      "Everything in Pro",
+      "Account support",
+      "Custom integrations",
+    ],
+  },
+];

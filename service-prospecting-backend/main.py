@@ -10,15 +10,29 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from dynamodb_service import delete_prospect, get_user_prospects, store_prospect
+from dynamodb_service import (
+    delete_prospect,
+    get_usage_log_count,
+    get_user_prospects,
+    log_feedback,
+    log_search,
+    store_prospect,
+)
 from prospecting.categories import filter_target_categories
 from prospecting.config import load_config, validate_config
 from prospecting.google_places import GooglePlacesClient
 from prospecting.search import prepare_new_prospects
+from stripe_service import (
+    create_billing_portal_session,
+    create_checkout_session,
+    handle_subscription_event,
+    parse_webhook_event,
+)
+from supabase_service import ensure_search_allowed, increment_search_usage, list_user_profiles
 
 
 app = FastAPI(title="Service Prospecting API", version="1.0.0")
@@ -71,6 +85,37 @@ class SearchResponse(BaseModel):
     user_id: str
 
 
+class CheckoutSessionRequest(BaseModel):
+    """Request body for Stripe Checkout session creation."""
+
+    user_id: str
+    price_id: str
+
+
+class BillingPortalRequest(BaseModel):
+    """Request body for Stripe Billing Portal session creation."""
+
+    user_id: str
+
+
+class FeedbackRequest(BaseModel):
+    """Request body for product feedback submissions."""
+
+    user_id: str = ""
+    feedback: str = Field(..., min_length=3, max_length=4000)
+    source_path: str = "/feedback"
+
+
+class AdminStatsResponse(BaseModel):
+    """Admin dashboard metrics returned by the backend."""
+
+    total_users: int
+    free_users: int
+    paid_users: int
+    total_searches: int
+    total_revenue: int = 0
+
+
 def _float_value(value: Any) -> float:
     """Convert optional numeric values into response-safe floats."""
     try:
@@ -121,6 +166,7 @@ async def search_prospects(request: SearchRequest) -> SearchResponse:
     search_id = str(uuid.uuid4())
 
     try:
+        user_profile = ensure_search_allowed(user_id)
         places_client = GooglePlacesClient(
             api_key=config.google_places_api_key,
             max_pages_per_category=config.max_pages_per_category,
@@ -142,6 +188,16 @@ async def search_prospects(request: SearchRequest) -> SearchResponse:
         for prospect in new_prospects:
             store_prospect(user_id=user_id, prospect=prospect, search_id=search_id)
 
+        increment_search_usage(user_id, user_profile)
+        log_search(
+            user_id=user_id,
+            zip_code=request.zip_code,
+            radius=request.radius,
+            categories=request.categories,
+            prospect_count=len(new_prospects),
+            search_id=search_id,
+        )
+
         return SearchResponse(
             count=len(new_prospects),
             duplicate_count=duplicate_count,
@@ -153,6 +209,61 @@ async def search_prospects(request: SearchRequest) -> SearchResponse:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Search failed: {exc}") from exc
+
+
+@app.post("/api/create-checkout-session")
+async def create_checkout_session_endpoint(request: CheckoutSessionRequest) -> dict[str, str]:
+    """Create a Stripe Checkout session for a subscription upgrade."""
+    return create_checkout_session(user_id=request.user_id, price_id=request.price_id)
+
+
+@app.post("/api/billing-portal")
+async def create_billing_portal_endpoint(request: BillingPortalRequest) -> dict[str, str]:
+    """Create a Stripe Billing Portal session for subscription management."""
+    return create_billing_portal_session(user_id=request.user_id)
+
+
+@app.post("/webhook/stripe")
+async def stripe_webhook(request: Request) -> dict[str, str]:
+    """Handle Stripe subscription lifecycle webhook events."""
+    payload = await request.body()
+    signature = request.headers.get("stripe-signature")
+    event = parse_webhook_event(payload, signature)
+    handle_subscription_event(event)
+    return {"status": "success"}
+
+
+@app.post("/api/feedback")
+async def submit_feedback(request: FeedbackRequest) -> dict[str, str]:
+    """Store product feedback for weekly review."""
+    feedback_id = log_feedback(
+        user_id=request.user_id,
+        feedback=request.feedback,
+        source_path=request.source_path,
+    )
+    return {"status": "received", "feedback_id": feedback_id}
+
+
+@app.get("/api/admin/stats", response_model=AdminStatsResponse)
+async def get_admin_stats(admin_key: str) -> AdminStatsResponse:
+    """Return high-level SaaS metrics for the admin dashboard."""
+    config = load_config()
+    if not config.admin_key or admin_key != config.admin_key:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    users = list_user_profiles()
+    free_users = [
+        user for user in users if str(user.get("subscription_status", "free")).lower() == "free"
+    ]
+    paid_users = len(users) - len(free_users)
+
+    return AdminStatsResponse(
+        total_users=len(users),
+        free_users=len(free_users),
+        paid_users=paid_users,
+        total_searches=get_usage_log_count(),
+        total_revenue=0,
+    )
 
 
 @app.get("/api/prospects/{user_id}")
@@ -185,4 +296,3 @@ async def health_check() -> dict[str, str]:
 async def root() -> dict[str, str]:
     """Return a small root response for manual smoke checks."""
     return {"message": "Service Prospecting API", "docs": "/docs"}
-

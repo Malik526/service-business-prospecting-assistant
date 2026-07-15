@@ -2,6 +2,49 @@
 
 ---
 
+## [2026-07-15 04:30 EDT] — feat: add Phase 4 monetization foundation
+
+**Files Added:** Supabase/Stripe backend services, frontend auth hook, auth,
+upgrade, feedback, admin dashboard, and Stripe return pages.
+
+**Files Modified:** `service-prospecting-backend/`,
+`service-prospecting-frontend/`, `README.md`, `CHANGELOG.md`
+
+### Summary
+Added the Phase 4 post-launch monetization foundation: authenticated access,
+usage cap enforcement, Stripe checkout and billing portal endpoints, webhook
+subscription sync, usage logging, admin metrics, and feedback collection.
+
+### Behavior
+- Added Supabase service-role backend helpers for user profiles and usage caps.
+- Added Stripe Checkout, Billing Portal, and subscription webhook helpers.
+- Added DynamoDB usage logs, search history, and feedback helpers.
+- Protected the prospecting page behind Supabase auth.
+- Added usage banner showing current monthly search allowance.
+- Added `/auth`, `/upgrade`, `/upgrade-success`, `/upgrade-canceled`,
+  `/feedback`, and `/admin/dashboard` frontend routes.
+- Added frontend API helpers for checkout, billing portal, feedback, and admin stats.
+- Added Supabase and Stripe env templates for frontend and backend.
+
+### Verification
+- `cd service-prospecting-frontend && npm run typecheck`
+- `cd service-prospecting-frontend && npm run lint`
+- `cd service-prospecting-frontend && npm run build`
+- `cd service-prospecting-frontend && npm audit --omit=dev` returned `found 0 vulnerabilities`
+- `cd service-prospecting-backend && .venv/bin/python -m compileall -q .`
+- `cd service-prospecting-backend && .venv/bin/python -m unittest discover -s tests -p 'test_*.py'`
+- `GET http://127.0.0.1:8000/health` returned `{"status":"ok","service":"prospecting-api"}`
+- `GET /auth`, `/prospecting`, `/upgrade`, `/feedback`, and `/admin/dashboard`
+  returned HTTP 200 from the local Next.js dev server.
+
+### External Setup Still Required
+- Create Supabase project and `users` table/RLS policy.
+- Create DynamoDB `usage_logs`, `search_history`, and `feedback` tables.
+- Create Stripe products, price IDs, and webhook endpoint.
+- Add real Supabase and Stripe values to local and production environment variables.
+
+---
+
 ## [2026-07-15 03:58 EDT] — feat: add SaaS prospecting frontend
 
 **Files Added:** `service-prospecting-frontend/`

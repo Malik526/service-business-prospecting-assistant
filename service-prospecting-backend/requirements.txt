@@ -5,4 +5,5 @@ google-api-python-client==1.12.1
 mangum==0.17.0
 python-dotenv==1.0.0
 requests==2.31.0
-
+stripe==11.4.1
+supabase==2.10.0

@@ -7,8 +7,10 @@ Decimal because boto3's DynamoDB resource API rejects native floats.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from uuid import uuid4
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -19,6 +21,9 @@ from prospecting.config import load_config
 CONFIG = load_config()
 dynamodb = boto3.resource("dynamodb", region_name=CONFIG.aws_region)
 prospects_table = dynamodb.Table(CONFIG.prospects_table_name)
+usage_logs_table = dynamodb.Table(CONFIG.usage_logs_table_name)
+search_history_table = dynamodb.Table(CONFIG.search_history_table_name)
+feedback_table = dynamodb.Table(CONFIG.feedback_table_name)
 
 
 def _decimal_or_zero(value: Any) -> Decimal:
@@ -104,3 +109,71 @@ def delete_prospect(user_id: str, place_id: str) -> None:
     """Delete one prospect by user ID and Google Place ID."""
     prospects_table.delete_item(Key={"user_id": user_id, "place_id": place_id})
 
+
+def log_search(
+    user_id: str,
+    zip_code: str,
+    radius: float,
+    categories: str | None,
+    prospect_count: int,
+    search_id: str,
+) -> None:
+    """Write a non-critical search usage log and saved search history item."""
+    timestamp = datetime.now(timezone.utc).isoformat()
+    try:
+        usage_logs_table.put_item(
+            Item={
+                "user_id": user_id,
+                "timestamp": timestamp,
+                "event_type": "search",
+                "search_id": search_id,
+                "zip_code": zip_code,
+                "radius": _decimal_or_zero(radius),
+                "categories": categories or "",
+                "prospect_count": prospect_count,
+                "date": timestamp[:10],
+            }
+        )
+    except Exception as exc:
+        print(f"Warning: could not write usage log: {exc}")
+
+    try:
+        search_history_table.put_item(
+            Item={
+                "user_id": user_id,
+                "search_id": search_id,
+                "created_at": timestamp,
+                "zip_code": zip_code,
+                "radius": _decimal_or_zero(radius),
+                "categories": categories or "",
+                "prospect_count": prospect_count,
+            }
+        )
+    except Exception as exc:
+        print(f"Warning: could not write search history: {exc}")
+
+
+def log_feedback(user_id: str, feedback: str, source_path: str) -> str:
+    """Store one feedback submission and return its generated ID."""
+    feedback_id = str(uuid4())
+    feedback_table.put_item(
+        Item={
+            "feedback_id": feedback_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "user_id": user_id,
+            "feedback": feedback,
+            "source_path": source_path,
+            "status": "new",
+        }
+    )
+    return feedback_id
+
+
+def get_usage_log_count(limit: int = 1000) -> int:
+    """Return an approximate count of recent usage log records."""
+    try:
+        response = usage_logs_table.scan(Select="COUNT", Limit=limit)
+        return int(response.get("Count", 0))
+    except Exception as exc:
+        print(f"Warning: could not scan usage logs: {exc}")
+        return 0

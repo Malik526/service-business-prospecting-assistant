@@ -42,3 +42,38 @@ export interface StoredProspectsResponse {
 export interface ApiErrorPayload {
   detail?: string;
 }
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  created_at?: string;
+  free_tier_searches_used: number;
+  free_tier_searches_limit: number;
+  subscription_status: "free" | "starter" | "pro" | "business";
+  stripe_customer_id?: string;
+  stripe_subscription_id?: string;
+  last_search_date?: string;
+  updated_at?: string;
+}
+
+export interface CheckoutSessionResponse {
+  session_id: string;
+  checkout_url: string;
+}
+
+export interface BillingPortalResponse {
+  portal_url: string;
+}
+
+export interface FeedbackResponse {
+  status: string;
+  feedback_id: string;
+}
+
+export interface AdminStats {
+  total_users: number;
+  free_users: number;
+  paid_users: number;
+  total_searches: number;
+  total_revenue: number;
+}

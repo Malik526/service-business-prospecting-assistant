@@ -6,6 +6,10 @@ import axios, { AxiosError } from "axios";
 
 import type {
   ApiErrorPayload,
+  AdminStats,
+  BillingPortalResponse,
+  CheckoutSessionResponse,
+  FeedbackResponse,
   SearchRequest,
   SearchResponse,
   StoredProspectsResponse,
@@ -57,5 +61,63 @@ export async function deleteProspect(userId: string, placeId: string): Promise<v
     await apiClient.delete(`/api/prospects/${userId}/${placeId}`);
   } catch (error) {
     throw new Error(getErrorMessage(error, "Failed to delete prospect"));
+  }
+}
+
+/** Creates a Stripe Checkout session for a paid plan. */
+export async function createCheckoutSession(
+  userId: string,
+  priceId: string,
+): Promise<CheckoutSessionResponse> {
+  try {
+    const response = await apiClient.post<CheckoutSessionResponse>("/api/create-checkout-session", {
+      user_id: userId,
+      price_id: priceId,
+    });
+    return response.data;
+  } catch (error) {
+    throw new Error(getErrorMessage(error, "Failed to create checkout session"));
+  }
+}
+
+/** Creates a Stripe Billing Portal session for the current user. */
+export async function createBillingPortal(userId: string): Promise<BillingPortalResponse> {
+  try {
+    const response = await apiClient.post<BillingPortalResponse>("/api/billing-portal", {
+      user_id: userId,
+    });
+    return response.data;
+  } catch (error) {
+    throw new Error(getErrorMessage(error, "Failed to open billing portal"));
+  }
+}
+
+/** Submits product feedback for weekly review. */
+export async function submitFeedback(
+  userId: string,
+  feedback: string,
+  sourcePath: string,
+): Promise<FeedbackResponse> {
+  try {
+    const response = await apiClient.post<FeedbackResponse>("/api/feedback", {
+      user_id: userId,
+      feedback,
+      source_path: sourcePath,
+    });
+    return response.data;
+  } catch (error) {
+    throw new Error(getErrorMessage(error, "Failed to submit feedback"));
+  }
+}
+
+/** Fetches admin dashboard metrics using a manually entered admin key. */
+export async function getAdminStats(adminKey: string): Promise<AdminStats> {
+  try {
+    const response = await apiClient.get<AdminStats>("/api/admin/stats", {
+      params: { admin_key: adminKey },
+    });
+    return response.data;
+  } catch (error) {
+    throw new Error(getErrorMessage(error, "Failed to load admin stats"));
   }
 }

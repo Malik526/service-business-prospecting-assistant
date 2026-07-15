@@ -7,11 +7,11 @@ import { useRef, useState } from "react";
 
 import { SearchForm } from "../components/forms";
 import { ResultsTable } from "../components/results";
-import { Alert, EmptyState, LoadingSpinner } from "../components/ui";
+import { AccountBar, Alert, EmptyState, LoadingSpinner, UsageBanner } from "../components/ui";
+import { useAuth } from "../hooks/useAuth";
 import { appContent } from "../lib/content";
 import { buildProspectCsv, downloadCsv } from "../lib/csv";
 import { searchProspects } from "../lib/api";
-import { getOrCreateUserId } from "../lib/user";
 import styles from "../styles/prospecting.module.css";
 import type { Prospect } from "../types/prospect";
 
@@ -24,9 +24,16 @@ export default function ProspectingPage(): JSX.Element {
   const [duplicateCount, setDuplicateCount] = useState(0);
   const [hasSearched, setHasSearched] = useState(false);
   const lastSearchRef = useRef("initial");
+  const { authLoading, user, profile, authError, configured, refreshProfile, logout } = useAuth();
+  const appReady = !authLoading && configured && Boolean(user && profile);
 
   /** Calls the backend search endpoint and updates result state. */
   async function handleSearch(zipCode: string, radius: number, categories: string): Promise<void> {
+    if (!user) {
+      setError("Sign in before searching.");
+      return;
+    }
+
     setLoading(true);
     setError("");
     setProspects([]);
@@ -37,13 +44,14 @@ export default function ProspectingPage(): JSX.Element {
         zip_code: zipCode,
         radius,
         categories: categories || undefined,
-        user_id: getOrCreateUserId(),
+        user_id: user?.id,
       });
 
       setProspects(response.prospects || []);
       setCount(response.count || 0);
       setDuplicateCount(response.duplicate_count || 0);
       lastSearchRef.current = `${zipCode}-${radius}-${categories || "all"}`;
+      await refreshProfile();
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Search failed");
       setCount(0);
@@ -78,11 +86,24 @@ export default function ProspectingPage(): JSX.Element {
         </header>
 
         <main className={styles.main}>
-          <SearchForm onSearch={handleSearch} loading={loading} />
+          {authLoading ? <LoadingSpinner /> : null}
+          {!authLoading && !configured ? (
+            <EmptyState title={appContent.setupTitle} body={appContent.setupBody} />
+          ) : null}
+          {!authLoading && authError ? (
+            <Alert title="Account error" message={authError} />
+          ) : null}
+          {appReady && user && profile ? (
+            <>
+              <AccountBar email={user.email || "Signed in"} onSignOut={logout} />
+              <UsageBanner profile={profile} />
+              <SearchForm onSearch={handleSearch} loading={loading} />
+            </>
+          ) : null}
 
-          {error ? <Alert title={appContent.errorTitle} message={error} /> : null}
-          {loading ? <LoadingSpinner /> : null}
-          {!loading && prospects.length > 0 ? (
+          {appReady && error ? <Alert title={appContent.errorTitle} message={error} /> : null}
+          {appReady && loading ? <LoadingSpinner /> : null}
+          {appReady && !loading && prospects.length > 0 ? (
             <ResultsTable
               prospects={prospects}
               count={count}
@@ -90,10 +111,10 @@ export default function ProspectingPage(): JSX.Element {
               onExport={handleExport}
             />
           ) : null}
-          {!loading && !error && prospects.length === 0 && hasSearched ? (
+          {appReady && !loading && !error && prospects.length === 0 && hasSearched ? (
             <EmptyState title={appContent.noResultsTitle} body={appContent.noResultsBody} />
           ) : null}
-          {!loading && !error && prospects.length === 0 && !hasSearched ? (
+          {appReady && !loading && !error && prospects.length === 0 && !hasSearched ? (
             <EmptyState title={appContent.emptyTitle} body={appContent.emptyBody} />
           ) : null}
         </main>
@@ -103,4 +124,3 @@ export default function ProspectingPage(): JSX.Element {
     </>
   );
 }
-
