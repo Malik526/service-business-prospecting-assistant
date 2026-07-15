@@ -2,6 +2,42 @@
 
 ---
 
+## [2026-07-15 03:41 EDT] — feat: scaffold SaaS prospecting backend
+
+**Files Added:** `service-prospecting-backend/main.py`,
+`service-prospecting-backend/lambda_handler.py`,
+`service-prospecting-backend/dynamodb_service.py`,
+`service-prospecting-backend/README.md`,
+`service-prospecting-backend/.env.example`,
+`service-prospecting-backend/requirements.txt`,
+`service-prospecting-backend/prospecting/`,
+`service-prospecting-backend/tests/test_search_preparation.py`
+
+**Files Modified:** `README.md`, `.gitignore`, `CHANGELOG.md`
+
+### Summary
+Added the Phase 1 FastAPI and AWS Lambda backend scaffold for the Service
+Business Prospecting SaaS MVP while keeping the existing Google Sheets CLI
+unchanged.
+
+### Behavior
+- Added `POST /api/prospects` for one ZIP/radius/category search per request.
+- Added `GET /api/prospects/{user_id}` and `DELETE /api/prospects/{user_id}/{place_id}`.
+- Packaged Google Places discovery, category filtering, dedupe, scoring, and
+  search preparation under `service-prospecting-backend/prospecting/`.
+- Added DynamoDB helpers using `user_id` and `place_id` keys.
+- Converted numeric values to `Decimal` before DynamoDB writes.
+- Added a Mangum Lambda handler for AWS Lambda deployment.
+- Added backend env and dependency templates.
+
+### Verification
+- `python3 -m compileall -q service-prospecting-backend`
+- `cd service-prospecting-backend && .venv/bin/python -m unittest discover -s tests -p 'test_*.py'`
+- `cd service-prospecting-backend && .venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000`
+- `GET http://127.0.0.1:8000/health` returned `{"status":"ok","service":"prospecting-api"}`
+
+---
+
 ## [2026-07-07 18:57 EDT] — feat: add standalone place id research script
 
 **Files Added:** `research_by_place_id.py`

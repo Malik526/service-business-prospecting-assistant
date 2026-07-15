@@ -604,6 +604,41 @@ config.py         Environment variable loading and validation
 utils.py          Shared helpers (distance, normalization, formatting)
 ```
 
+### SaaS Backend MVP
+
+The `service-prospecting-backend/` folder contains the Phase 1 FastAPI/Lambda
+backend scaffold for the web-based SaaS version of this tool. It is separate
+from the local Google Sheets CLI so the first SaaS iteration can run one search
+per request and store results in DynamoDB without changing the existing scraper.
+
+Backend files include:
+
+| Path | Purpose |
+|---|---|
+| `service-prospecting-backend/main.py` | FastAPI app and prospect API endpoints |
+| `service-prospecting-backend/lambda_handler.py` | Mangum adapter for AWS Lambda |
+| `service-prospecting-backend/dynamodb_service.py` | DynamoDB store, query, and delete helpers |
+| `service-prospecting-backend/prospecting/` | Packaged Google Places, scoring, dedupe, category, and search prep code |
+| `service-prospecting-backend/.env.example` | Local environment template |
+| `service-prospecting-backend/requirements.txt` | Backend deployment dependencies |
+
+Expected DynamoDB table shape:
+
+| Key | Type |
+|---|---|
+| `user_id` | String partition key |
+| `place_id` | String sort key |
+
+Run locally:
+
+```bash
+cd service-prospecting-backend
+pip install -r requirements.txt
+uvicorn main:app --reload
+```
+
+Then open `http://localhost:8000/docs`.
+
 ---
 
 ## Common Debugging Issues
