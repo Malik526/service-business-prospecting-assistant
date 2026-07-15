@@ -9,3 +9,7 @@ service-prospecting-backend/.env
 service-prospecting-backend/.venv/
 service-prospecting-backend/package/
 service-prospecting-backend/lambda_function.zip
+service-prospecting-frontend/.env.local
+service-prospecting-frontend/.next/
+service-prospecting-frontend/node_modules/
+service-prospecting-frontend/out/
