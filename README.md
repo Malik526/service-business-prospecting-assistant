@@ -684,13 +684,15 @@ Run locally:
 ```bash
 cd service-prospecting-frontend
 npm install
-cp .env.example .env.local
+cp .env.local.example .env.local
 npm run dev
 ```
 
 Then open `http://localhost:3000/prospecting`. Keep
 `NEXT_PUBLIC_LAMBDA_URL=http://localhost:8000` for local backend testing, and
-replace it with the deployed Lambda Function URL in Netlify.
+replace it with the deployed Lambda Function URL in Netlify. Put real local
+frontend values in `.env.local`; keep `.env.local.example` as the committed
+template.
 
 ### Phase 4 Monetization Setup
 

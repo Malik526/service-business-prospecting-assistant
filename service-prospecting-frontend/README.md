@@ -38,10 +38,14 @@ env values must use `NEXT_PUBLIC_` and must never include service-role secrets.
 NEXT_PUBLIC_LAMBDA_URL=http://localhost:8000
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_your_publishable_key
 NEXT_PUBLIC_STRIPE_PRICE_STARTER_MONTHLY=price_starter_monthly
 NEXT_PUBLIC_STRIPE_PRICE_PRO_MONTHLY=price_pro_monthly
 NEXT_PUBLIC_STRIPE_PRICE_BUSINESS_MONTHLY=price_business_monthly
 ```
+
+Use `.env.local.example` as the committed template. Use `.env.local` for your
+actual local values, and never commit it.
 
 ## Phase 4 Routes
 

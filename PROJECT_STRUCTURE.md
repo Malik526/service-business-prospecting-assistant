@@ -94,13 +94,13 @@ Each component owns exactly one tracked example template:
 
 - Root CLI: `.env.example`
 - Backend: `service-prospecting-backend/.env.example`
-- Frontend: `service-prospecting-frontend/.env.example`
-- Frontend local alias: `service-prospecting-frontend/.env.local.example`
+- Frontend: `service-prospecting-frontend/.env.local.example`
 
 Real local env files remain ignored:
 
 - `.env`
 - `service-prospecting-backend/.env`
+- `service-prospecting-frontend/.env`
 - `service-prospecting-frontend/.env.local`
 
 Never put service role keys, API keys, or credential JSON in tracked example
@@ -124,4 +124,3 @@ from prospecting.search import prepare_new_prospects
 
 The compatibility wrappers keep old code stable while making shared modules the
 only place where scraper and scoring logic should change.
-

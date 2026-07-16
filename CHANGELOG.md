@@ -2,6 +2,40 @@
 
 ---
 
+## [2026-07-16 17:50 EDT] — config: simplify frontend env templates
+
+**Files Removed:** `service-prospecting-frontend/.env.example`
+
+**Files Modified:** `.gitignore`, `README.md`, `PROJECT_STRUCTURE.md`,
+`service-prospecting-frontend/README.md`, `CHANGELOG.md`
+
+### Summary
+Audited the backend and frontend environment file setup and simplified the
+frontend to one committed local template plus one ignored local values file.
+
+### Changed
+- Removed the duplicate frontend `.env.example` template.
+- Standardized frontend setup on `.env.local.example` for the committed template
+  and `.env.local` for actual local values.
+- Updated root and frontend README instructions to copy
+  `.env.local.example` to `.env.local`.
+- Updated `PROJECT_STRUCTURE.md` so the environment file map matches the
+  simplified frontend convention.
+- Added `service-prospecting-frontend/.env` to `.gitignore` to prevent accidental
+  frontend env files from being committed.
+
+### Local Setup
+- Created ignored local `service-prospecting-backend/.env` from
+  `service-prospecting-backend/.env.example`; real secret values still need to
+  be filled in locally.
+
+### Verification
+- Confirmed `.gitignore` protects root `.env`, backend `.env`, frontend `.env`,
+  and frontend `.env.local`.
+- Confirmed backend `.env` exists locally and remains untracked.
+
+---
+
 ## [2026-07-16 17:36 EDT] — docs: clarify structure and consolidate shared prospecting code
 
 **Files Added:** `PROJECT_STRUCTURE.md`, `shared/`,
