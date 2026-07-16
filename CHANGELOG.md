@@ -2,6 +2,39 @@
 
 ---
 
+## [2026-07-16 19:51 EDT] — fix: wait for Supabase sign-in before redirecting
+
+**Files Modified:** `service-prospecting-frontend/pages/auth.tsx`, `CHANGELOG.md`
+
+### Summary
+Fixed the Google sign-in redirect timing that could bounce users between
+`/auth` and `/prospecting` before the Supabase browser session was available.
+
+### Behavior
+- Removed the immediate `redirectTo="/prospecting"` behavior from the Supabase
+  Auth UI.
+- Added a Supabase `onAuthStateChange` listener that redirects to
+  `/prospecting` only after a `SIGNED_IN` event includes a confirmed session.
+- Kept the existing already-signed-in session check for users who revisit
+  `/auth`.
+- Added cleanup for the auth subscription on unmount.
+
+### Verification
+- `cd service-prospecting-frontend && npm run typecheck`
+- `cd service-prospecting-frontend && npm run lint`
+- `cd service-prospecting-frontend && npm run build`
+- `cd service-prospecting-frontend && npm run dev`
+- `GET http://localhost:3000/auth` returned HTTP 200.
+
+### Manual Verification Still Required
+- Complete Google OAuth sign-in in a browser and confirm it lands on
+  `/prospecting` without flickering back to `/auth`.
+- Confirm Supabase auth logs show a successful callback/user request.
+- Confirm the browser has the Supabase session token in localStorage.
+- Confirm logout returns to `/auth`.
+
+---
+
 ## [2026-07-16 17:50 EDT] — config: simplify frontend env templates
 
 **Files Removed:** `service-prospecting-frontend/.env.example`

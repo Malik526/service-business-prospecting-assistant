@@ -17,14 +17,16 @@ import styles from "../styles/prospecting.module.css";
 export default function AuthPage(): JSX.Element {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [redirectTo, setRedirectTo] = useState("");
 
   useEffect(() => {
+    let mounted = true;
+
     /** Redirects an already signed-in user to the main app. */
     async function checkSession(): Promise<void> {
-      setRedirectTo(`${window.location.origin}/prospecting`);
       if (!isSupabaseConfigured) {
-        setLoading(false);
+        if (mounted) {
+          setLoading(false);
+        }
         return;
       }
 
@@ -35,10 +37,25 @@ export default function AuthPage(): JSX.Element {
         await router.push("/prospecting");
         return;
       }
-      setLoading(false);
+      if (mounted) {
+        setLoading(false);
+      }
     }
 
     checkSession();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === "SIGNED_IN" && session) {
+        await router.push("/prospecting");
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, [router]);
 
   return (
@@ -60,7 +77,6 @@ export default function AuthPage(): JSX.Element {
               supabaseClient={supabase}
               appearance={{ theme: ThemeSupa }}
               providers={["google"]}
-              redirectTo={redirectTo}
             />
           </section>
         ) : null}
@@ -68,4 +84,3 @@ export default function AuthPage(): JSX.Element {
     </>
   );
 }
-
