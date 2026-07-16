@@ -2,6 +2,56 @@
 
 ---
 
+## [2026-07-16 17:36 EDT] — docs: clarify structure and consolidate shared prospecting code
+
+**Files Added:** `PROJECT_STRUCTURE.md`, `shared/`,
+`service-prospecting-frontend/.env.local.example`
+
+**Files Modified:** root CLI compatibility modules, backend prospecting
+compatibility modules, backend/frontend README files, env examples,
+`README.md`, `CHANGELOG.md`
+
+### Summary
+Reviewed the CLI, backend, and frontend hierarchy and clarified that the SaaS
+backend/frontend are intentionally nested inside the original prospecting
+assistant root. Consolidated duplicated prospecting logic behind a shared
+package while preserving existing CLI and backend import paths.
+
+### Added
+- Added `shared/prospecting/` as the source of truth for categories, Google
+  Places discovery, dedupe, scoring, utility helpers, and search preparation.
+- Added `PROJECT_STRUCTURE.md` to document directory ownership, duplication
+  audit results, environment-file ownership, and compatibility import paths.
+- Added `shared/README.md` describing the shared package boundary.
+- Added `service-prospecting-frontend/.env.local.example` for local browser-safe
+  frontend setup.
+
+### Changed
+- Replaced duplicated root CLI scraper/scoring modules with documented wrappers
+  that re-export from `shared.prospecting`.
+- Replaced duplicated backend `prospecting` modules with documented wrappers
+  that re-export from `shared.prospecting`.
+- Kept backend `prospecting/config.py` separate because backend env values are
+  intentionally different from root CLI env values.
+- Updated root, backend, and frontend READMEs with ownership and setup notes.
+- Restored tracked backend env example values to placeholders only.
+
+### Security
+- Removed a real-looking Supabase service role value from
+  `service-prospecting-backend/.env.example`.
+- Confirmed `.gitignore` excludes real local env files, credentials, venvs,
+  frontend build output, and node modules.
+
+### Verification
+- `python3 -m compileall -q .`
+- `python3 -m unittest discover -s tests -p 'test_*.py'`
+- `cd service-prospecting-backend && .venv/bin/python -m unittest discover -s tests -p 'test_*.py'`
+- `cd service-prospecting-frontend && npm run typecheck`
+- `cd service-prospecting-frontend && npm run lint`
+- `cd service-prospecting-frontend && npm run build`
+
+---
+
 ## [2026-07-15 04:30 EDT] — feat: add Phase 4 monetization foundation
 
 **Files Added:** Supabase/Stripe backend services, frontend auth hook, auth,

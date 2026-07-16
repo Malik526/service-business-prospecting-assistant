@@ -4,6 +4,19 @@
 
 Service Business Prospecting Assistant is a local Python CLI tool for discovering, deduplicating, scoring, and storing local service-based business prospects for outreach planning.
 
+## Project Structure
+
+This repository now has one intentional nested structure:
+
+- Root files: original CLI and Google Sheets workflow.
+- `shared/prospecting/`: source of truth for reusable scraper, category, dedupe, scoring, and search-preparation logic.
+- `service-prospecting-backend/`: FastAPI/Lambda API layer for SaaS usage.
+- `service-prospecting-frontend/`: Next.js SaaS interface.
+- `PROJECT_STRUCTURE.md`: detailed ownership, import, and env-file map.
+
+The old root imports still work through compatibility wrappers, so existing CLI
+commands remain backwards compatible.
+
 It uses:
 
 - Google Places API for business discovery and enrichment

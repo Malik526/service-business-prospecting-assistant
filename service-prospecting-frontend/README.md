@@ -2,11 +2,28 @@
 
 Next.js interface for the Service Business Prospecting SaaS MVP.
 
+## What This Directory Does
+
+This directory renders the browser UI for authenticated prospect searches,
+usage visibility, plan upgrades, feedback submission, and admin metrics.
+
+## Files & Purpose
+
+- `pages/`: Next.js route pages.
+- `components/forms/`: reusable form components.
+- `components/results/`: prospect result display components.
+- `components/ui/`: reusable UI primitives for this app.
+- `hooks/useAuth.ts`: Supabase auth and profile-loading hook.
+- `lib/api.ts`: typed backend API client.
+- `lib/supabase.ts`: browser Supabase client and profile helpers.
+- `lib/content.ts`: central user-facing content and plan metadata.
+- `types/prospect.ts`: shared frontend TypeScript types.
+
 ## Local Setup
 
 ```bash
 npm install
-cp .env.example .env.local
+cp .env.local.example .env.local
 npm run dev
 ```
 
@@ -14,7 +31,8 @@ Open `http://localhost:3000/prospecting`.
 
 ## Environment
 
-Set `NEXT_PUBLIC_LAMBDA_URL` to the FastAPI or Lambda Function URL.
+Set `NEXT_PUBLIC_LAMBDA_URL` to the FastAPI or Lambda Function URL. Browser
+env values must use `NEXT_PUBLIC_` and must never include service-role secrets.
 
 ```bash
 NEXT_PUBLIC_LAMBDA_URL=http://localhost:8000
