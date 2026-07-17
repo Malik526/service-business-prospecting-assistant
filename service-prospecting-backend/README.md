@@ -39,6 +39,16 @@ uvicorn main:app --reload
 
 4. Open `http://localhost:8000/docs`.
 
+## Supabase API Setup
+
+Authenticated searches send the logged-in Supabase user ID to the backend so
+the API can enforce usage limits. The backend `.env` must use the Supabase
+service-role key, not the frontend anon key, for `SUPABASE_SERVICE_ROLE_KEY`.
+
+The service-role key is a long JWT-style value that starts with `eyJ`. If a
+logged-in search returns `Invalid API key` before Google Places is called,
+replace `SUPABASE_SERVICE_ROLE_KEY`, restart the backend, and retry.
+
 ## Google API Setup
 
 Prospect search requires the local `GOOGLE_PLACES_API_KEY` to belong to a

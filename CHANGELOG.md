@@ -2,6 +2,26 @@
 
 ---
 
+## [2026-07-16 21:26 EDT] — docs: clarify backend Supabase service key
+
+**Files Modified:** `service-prospecting-backend/README.md`, `CHANGELOG.md`
+
+### Summary
+Documented that authenticated backend searches require the Supabase
+service-role key, not the frontend anon key.
+
+### Diagnostic Note
+- Local `.env` has a `SUPABASE_SERVICE_ROLE_KEY` value, but its masked shape
+  does not look like a Supabase service-role JWT.
+- Direct search with a non-guest `user_id` reached the backend but returned
+  `Invalid API key` during the Supabase usage check.
+
+### Manual Action Required
+- Replace backend `SUPABASE_SERVICE_ROLE_KEY` with the real Supabase
+  service-role key, restart the backend, and retry authenticated search.
+
+---
+
 ## [2026-07-16 21:23 EDT] — fix: declare backend OpenSSL dependency
 
 **Files Modified:** `service-prospecting-backend/requirements.txt`,
