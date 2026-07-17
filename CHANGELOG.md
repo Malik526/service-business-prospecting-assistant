@@ -2,6 +2,43 @@
 
 ---
 
+## [2026-07-16 21:23 EDT] — fix: declare backend OpenSSL dependency
+
+**Files Modified:** `service-prospecting-backend/requirements.txt`,
+`service-prospecting-backend/README.md`, `CHANGELOG.md`
+
+### Summary
+Declared a modern `pyOpenSSL` dependency for the backend after local diagnosis
+showed the FastAPI worker crashing during `boto3` import before the API could
+serve search requests.
+
+### Behavior
+- Prevents the backend from falling back to the incompatible system
+  `pyOpenSSL 21.0.0` package when newer user-site `cryptography` packages are
+  installed.
+- Allows the backend process to reach `/health` and accept prospect search
+  requests once dependencies are installed from `requirements.txt`.
+- Keeps frontend API configuration unchanged because
+  `NEXT_PUBLIC_LAMBDA_URL` already points to `http://localhost:8000`.
+- Documents that both Google Geocoding API and Places API must be enabled for
+  the configured Google Cloud project.
+
+### Verification
+- `cd service-prospecting-backend && python3 -m pip install -r requirements.txt`
+- `cd service-prospecting-backend && python3 -m unittest discover -s tests`
+- `cd service-prospecting-backend && uvicorn main:app --reload`
+- `GET http://127.0.0.1:8000/health` returned HTTP 200.
+- `POST http://127.0.0.1:8000/api/prospects` reached the backend and returned
+  Google `REQUEST_DENIED` because the required Google API is not activated for
+  the configured project.
+
+### Manual Action Required
+- Enable the missing Google Maps Platform API in Google Cloud Console for the
+  project that owns the local `GOOGLE_PLACES_API_KEY`, wait about 60 seconds,
+  restart the backend, and retry search.
+
+---
+
 ## [2026-07-16 20:53 EDT] — fix: parse OAuth callback tokens explicitly
 
 **Files Modified:** `service-prospecting-frontend/pages/auth/callback.tsx`,

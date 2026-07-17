@@ -1,6 +1,8 @@
+# Backend runtime dependencies for the FastAPI prospecting API.
 fastapi==0.104.0
 uvicorn==0.24.0
 boto3==1.28.0
+pyOpenSSL>=24.0.0
 google-api-python-client==1.12.1
 mangum==0.17.0
 python-dotenv==1.0.0

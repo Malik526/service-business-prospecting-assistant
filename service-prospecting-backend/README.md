@@ -39,6 +39,18 @@ uvicorn main:app --reload
 
 4. Open `http://localhost:8000/docs`.
 
+## Google API Setup
+
+Prospect search requires the local `GOOGLE_PLACES_API_KEY` to belong to a
+Google Cloud project with these APIs enabled:
+
+- Geocoding API, used to convert ZIP codes into latitude and longitude.
+- Places API, used for Text Search and Place Details.
+
+If `/api/prospects` returns `Google API error: REQUEST_DENIED` with a message
+that the API is not activated, enable the missing API in Google Cloud Console,
+wait about 60 seconds, restart the backend, and try the search again.
+
 ## Endpoints
 
 - `POST /api/prospects` searches one ZIP/radius/category request, stores new prospects in DynamoDB, and returns JSON results.
