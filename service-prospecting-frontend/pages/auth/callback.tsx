@@ -12,6 +12,7 @@ import { supabase } from "../../lib/supabase";
 import styles from "../../styles/prospecting.module.css";
 
 const SESSION_CHECK_ATTEMPTS = 8;
+const SESSION_PARSE_DELAY_MS = 500;
 const SESSION_CHECK_DELAY_MS = 250;
 
 /** Pauses briefly between session checks while Supabase stores OAuth state. */
@@ -48,18 +49,22 @@ export default function CallbackPage(): JSX.Element {
     /** Checks the OAuth-created session before sending users into the app. */
     async function handleAuthCallback(): Promise<void> {
       try {
+        await wait(SESSION_PARSE_DELAY_MS);
         const session = await waitForSession();
         if (!mounted) {
           return;
         }
 
         if (session) {
+          console.log("Session created, redirecting to prospecting.");
           await router.push("/prospecting");
           return;
         }
 
+        console.log("No session created, redirecting to auth.");
         await router.push("/auth");
       } catch (error) {
+        console.error("Auth callback error:", error);
         await router.push("/auth");
       }
     }

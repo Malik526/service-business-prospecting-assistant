@@ -19,6 +19,13 @@ export const isSupabaseConfigured = Boolean(
 export const supabase = createClient(
   isSupabaseConfigured ? supabaseUrl : "https://placeholder.supabase.co",
   isSupabaseConfigured ? supabaseAnonKey : "placeholder-anon-key",
+  {
+    auth: {
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      persistSession: true,
+    },
+  },
 );
 
 /** Returns the currently authenticated Supabase user. */
@@ -46,4 +53,3 @@ export async function getUserProfile(userId: string): Promise<UserProfile> {
 export async function signOut(): Promise<void> {
   await supabase.auth.signOut();
 }
-

@@ -2,6 +2,40 @@
 
 ---
 
+## [2026-07-16 20:42 EDT] — fix: detect OAuth sessions from callback URLs
+
+**Files Modified:** `service-prospecting-frontend/lib/supabase.ts`,
+`service-prospecting-frontend/pages/auth/callback.tsx`, `CHANGELOG.md`
+
+### Summary
+Made Supabase browser session parsing explicit and gave the callback route time
+to detect OAuth sessions before redirecting users.
+
+### Behavior
+- Added explicit Supabase auth options for URL session detection, session
+  persistence, and token refresh.
+- Added an initial callback delay before polling `getSession()` so Supabase can
+  parse OAuth URL fragments and write the browser session.
+- Added callback console messages for session-created, no-session, and callback
+  error outcomes.
+
+### Verification
+- `cd service-prospecting-frontend && npm run typecheck`
+- `cd service-prospecting-frontend && npm run lint`
+- `cd service-prospecting-frontend && npm run build`
+- `cd service-prospecting-frontend && npm run dev`
+- `GET http://localhost:3000/auth` returned HTTP 200.
+- `GET http://localhost:3000/auth/callback` returned HTTP 200.
+
+### Manual Verification Still Required
+- Confirm Google OAuth redirect URI settings include the local auth callback
+  route required for the active Supabase/Google flow.
+- Complete Google OAuth in a browser and confirm the callback logs
+  `Session created, redirecting to prospecting.`
+- Confirm `/prospecting` loads without returning to `/auth`.
+
+---
+
 ## [2026-07-16 20:18 EDT] — fix: add OAuth callback handler
 
 **Files Added:** `service-prospecting-frontend/pages/auth/callback.tsx`
