@@ -2,6 +2,42 @@
 
 ---
 
+## [2026-07-16 20:53 EDT] — fix: parse OAuth callback tokens explicitly
+
+**Files Modified:** `service-prospecting-frontend/pages/auth/callback.tsx`,
+`CHANGELOG.md`
+
+### Summary
+Updated the OAuth callback to manually consume Supabase access and refresh
+tokens from the URL fragment before checking for an authenticated session.
+
+### Behavior
+- Parses `access_token` and `refresh_token` from the callback URL fragment.
+- Calls `supabase.auth.setSession()` when both tokens are available.
+- Removes the token-bearing fragment from browser history after the session is
+  stored.
+- Verifies the session with `getSession()` before routing to `/prospecting`.
+- Routes failed or sessionless callbacks back to `/auth` without logging token
+  values.
+- Preserves the existing CSS-module-based callback UI and accessible status
+  announcement.
+
+### Verification
+- `cd service-prospecting-frontend && npm run typecheck`
+- `cd service-prospecting-frontend && npm run lint`
+- `cd service-prospecting-frontend && npm run build`
+- `cd service-prospecting-frontend && npm run dev`
+
+### Manual Verification Still Required
+- Complete Google OAuth in a browser and confirm the callback reports that the
+  access token was found and the session was set and confirmed.
+- Confirm `/prospecting` loads without returning to `/auth`.
+- Confirm logout and a second Google sign-in both complete successfully.
+- Run a prospect search and confirm authenticated backend requests do not
+  return HTTP 401.
+
+---
+
 ## [2026-07-16 20:42 EDT] — fix: detect OAuth sessions from callback URLs
 
 **Files Modified:** `service-prospecting-frontend/lib/supabase.ts`,

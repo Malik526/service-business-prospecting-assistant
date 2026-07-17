@@ -1,6 +1,6 @@
 /** OAuth callback handler page.
- *  Receives users after Google OAuth, waits for the Supabase browser session,
- *  then redirects authenticated users to the prospecting workspace.
+ *  Manually consumes Supabase tokens from the URL fragment, verifies the
+ *  resulting browser session, and routes users to the appropriate page.
  */
 
 import Head from "next/head";
@@ -11,61 +11,74 @@ import { appContent } from "../../lib/content";
 import { supabase } from "../../lib/supabase";
 import styles from "../../styles/prospecting.module.css";
 
-const SESSION_CHECK_ATTEMPTS = 8;
-const SESSION_PARSE_DELAY_MS = 500;
-const SESSION_CHECK_DELAY_MS = 250;
+/** Extracts OAuth tokens from the URL fragment without exposing their values. */
+function getOAuthTokens(): { accessToken: string | null; refreshToken: string | null } {
+  const params = new URLSearchParams(window.location.hash.substring(1));
 
-/** Pauses briefly between session checks while Supabase stores OAuth state. */
-function wait(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, milliseconds);
-  });
+  return {
+    accessToken: params.get("access_token"),
+    refreshToken: params.get("refresh_token"),
+  };
 }
 
-/** Waits for Supabase to expose the session created by the OAuth callback. */
-async function waitForSession() {
-  for (let attempt = 0; attempt < SESSION_CHECK_ATTEMPTS; attempt += 1) {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (session) {
-      return session;
-    }
-
-    await wait(SESSION_CHECK_DELAY_MS);
-  }
-
-  return null;
-}
-
-/** Handles Supabase OAuth completion and redirects based on session status. */
+/** Handles Supabase OAuth completion and redirects based on verified session state. */
 export default function CallbackPage(): JSX.Element {
   const router = useRouter();
 
   useEffect(() => {
     let mounted = true;
 
-    /** Checks the OAuth-created session before sending users into the app. */
+    /** Sets tokens from the callback URL, then confirms the persisted session. */
     async function handleAuthCallback(): Promise<void> {
       try {
-        await wait(SESSION_PARSE_DELAY_MS);
-        const session = await waitForSession();
+        const { accessToken, refreshToken } = getOAuthTokens();
+
+        console.log(`Access token from URL: ${accessToken ? "Found" : "Not found"}`);
+
+        if (accessToken && refreshToken) {
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+
+          if (error) {
+            console.error("Failed to set session:", error.message);
+            if (mounted) {
+              await router.replace("/auth");
+            }
+            return;
+          }
+
+          window.history.replaceState(null, "", window.location.pathname);
+          console.log("Session set successfully.");
+        }
+
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
+
+        if (sessionError) {
+          throw sessionError;
+        }
+
         if (!mounted) {
           return;
         }
 
         if (session) {
-          console.log("Session created, redirecting to prospecting.");
-          await router.push("/prospecting");
+          console.log("Session confirmed, redirecting to prospecting.");
+          await router.replace("/prospecting");
           return;
         }
 
-        console.log("No session created, redirecting to auth.");
-        await router.push("/auth");
+        console.log("No session found after parsing, redirecting to auth.");
+        await router.replace("/auth");
       } catch (error) {
         console.error("Auth callback error:", error);
-        await router.push("/auth");
+        if (mounted) {
+          await router.replace("/auth");
+        }
       }
     }
 
@@ -85,7 +98,7 @@ export default function CallbackPage(): JSX.Element {
         <section className={styles.authPanel} role="status" aria-live="polite">
           <p className={styles.kicker}>Account</p>
           <h1>Completing sign-in</h1>
-          <p>Please wait while we finish setting up your session.</p>
+          <p>Please wait while we secure your session.</p>
         </section>
       </main>
     </>
