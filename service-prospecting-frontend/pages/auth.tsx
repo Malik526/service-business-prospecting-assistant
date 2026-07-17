@@ -17,12 +17,17 @@ import styles from "../styles/prospecting.module.css";
 export default function AuthPage(): JSX.Element {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [callbackUrl, setCallbackUrl] = useState("");
 
   useEffect(() => {
     let mounted = true;
 
     /** Redirects an already signed-in user to the main app. */
     async function checkSession(): Promise<void> {
+      if (mounted) {
+        setCallbackUrl(`${window.location.origin}/auth/callback`);
+      }
+
       if (!isSupabaseConfigured) {
         if (mounted) {
           setLoading(false);
@@ -77,6 +82,8 @@ export default function AuthPage(): JSX.Element {
               supabaseClient={supabase}
               appearance={{ theme: ThemeSupa }}
               providers={["google"]}
+              redirectTo={callbackUrl}
+              onlyThirdPartyProviders={false}
             />
           </section>
         ) : null}

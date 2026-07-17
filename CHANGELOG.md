@@ -2,6 +2,43 @@
 
 ---
 
+## [2026-07-16 20:18 EDT] — fix: add OAuth callback handler
+
+**Files Added:** `service-prospecting-frontend/pages/auth/callback.tsx`
+
+**Files Modified:** `service-prospecting-frontend/pages/auth.tsx`, `CHANGELOG.md`
+
+### Summary
+Added a dedicated Supabase OAuth callback page so Google sign-in returns to an
+intermediate route that waits for the browser session before entering the
+protected prospecting workspace.
+
+### Behavior
+- Updated the Supabase Auth UI to redirect OAuth results to `/auth/callback`.
+- Added `onlyThirdPartyProviders={false}` explicitly on the Auth UI.
+- Added `/auth/callback` to check for a Supabase session with a short retry
+  window before redirecting.
+- Sends authenticated users to `/prospecting` and failed/no-session callbacks
+  back to `/auth`.
+- Styled the callback page with the existing auth shell and panel classes.
+
+### Verification
+- `cd service-prospecting-frontend && npm run typecheck`
+- `cd service-prospecting-frontend && npm run lint`
+- `cd service-prospecting-frontend && npm run build`
+- `cd service-prospecting-frontend && npm run dev`
+- `GET http://localhost:3000/auth` returned HTTP 200.
+- `GET http://localhost:3000/auth/callback` returned HTTP 200.
+
+### Manual Verification Still Required
+- Complete Google OAuth in a browser and confirm the flow briefly visits
+  `/auth/callback`, then lands on `/prospecting` without looping.
+- Confirm the browser has a Supabase `sb-...` localStorage session.
+- Confirm Supabase auth logs show successful callback/user requests.
+- Confirm logout still returns to `/auth`.
+
+---
+
 ## [2026-07-16 19:51 EDT] — fix: wait for Supabase sign-in before redirecting
 
 **Files Modified:** `service-prospecting-frontend/pages/auth.tsx`, `CHANGELOG.md`
